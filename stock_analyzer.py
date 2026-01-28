@@ -71,7 +71,9 @@ class TrendAnalysisResult:
     ma5: float = 0.0
     ma10: float = 0.0
     ma20: float = 0.0
-    ma60: float = 0.0
+    ma50: float = 0.0
+    ma120: float = 0.0
+    ma200: float = 0.0
     current_price: float = 0.0
     
     # 乖离率（与 MA5 的偏离度）
@@ -87,6 +89,10 @@ class TrendAnalysisResult:
     # 支撑压力
     support_ma5: bool = False        # MA5 是否构成支撑
     support_ma10: bool = False       # MA10 是否构成支撑
+    support_ma20: bool = False   # MA20是否构成支撑
+    support_ma50: bool = False   # MA50是否构成支撑
+    support_ma120: bool = False  # MA120是否构成支撑
+    support_ma200: bool = False  # MA120是否构成支撑
     resistance_levels: List[float] = field(default_factory=list)
     support_levels: List[float] = field(default_factory=list)
     
@@ -105,7 +111,9 @@ class TrendAnalysisResult:
             'ma5': self.ma5,
             'ma10': self.ma10,
             'ma20': self.ma20,
-            'ma60': self.ma60,
+            'ma50': self.ma50,
+            'ma120': self.ma120,
+            'ma200': self.ma200,
             'current_price': self.current_price,
             'bias_ma5': self.bias_ma5,
             'bias_ma10': self.bias_ma10,
@@ -115,6 +123,10 @@ class TrendAnalysisResult:
             'volume_trend': self.volume_trend,
             'support_ma5': self.support_ma5,
             'support_ma10': self.support_ma10,
+            'support_ma20': self.support_ma20,
+            'support_ma50': self.support_ma50,
+            'support_ma120': self.support_ma120,
+            'support_ma200': self.support_ma200,
             'buy_signal': self.buy_signal.value,
             'signal_score': self.signal_score,
             'signal_reasons': self.signal_reasons,
@@ -173,7 +185,9 @@ class StockTrendAnalyzer:
         result.ma5 = float(latest['MA5'])
         result.ma10 = float(latest['MA10'])
         result.ma20 = float(latest['MA20'])
-        result.ma60 = float(latest.get('MA60', 0))
+        result.ma50 = float(latest.get('MA50', 0))
+        result.ma120 = float(latest.get('MA120', 0))
+        result.ma200 = float(latest.get('MA200', 0))
         
         # 1. 趋势判断
         self._analyze_trend(df, result)
@@ -198,10 +212,13 @@ class StockTrendAnalyzer:
         df['MA5'] = df['close'].rolling(window=5).mean()
         df['MA10'] = df['close'].rolling(window=10).mean()
         df['MA20'] = df['close'].rolling(window=20).mean()
-        if len(df) >= 60:
-            df['MA60'] = df['close'].rolling(window=60).mean()
+        df['MA50'] = df['close'].rolling(window=50).mean()
+        df['MA120'] = df['close'].rolling(window=120).mean()
+        df['MA200'] = df['close'].rolling(window=200).mean()
+        if len(df) >= 200:
+            df['MA200'] = df['close'].rolling(window=200).mean()
         else:
-            df['MA60'] = df['MA20']  # 数据不足时使用 MA20 替代
+            df['MA200'] = df['MA120']  # 数据不足时使用 MA120 替代
         return df
     
     def _analyze_trend(self, df: pd.DataFrame, result: TrendAnalysisResult) -> None:
@@ -336,8 +353,16 @@ class StockTrendAnalyzer:
                     result.support_levels.append(result.ma10)
         
         # MA20 作为重要支撑
-        if result.ma20 > 0 and price >= result.ma20:
+        if 0 < result.ma20 <= price:
             result.support_levels.append(result.ma20)
+
+        if 0 < result.ma50 <= price:
+            result.support_levels.append(result.ma50)
+        if 0 < result.ma120 <= price:
+            result.support_levels.append(result.ma120)
+
+        if 0 < result.ma200 <= price:
+            result.support_levels.append(result.ma200)
         
         # 近期高点作为压力
         if len(df) >= 20:

@@ -781,6 +781,25 @@ def run_market_review(notifier: NotificationService, analyzer=None, search_servi
     return None
 
 
+def run_theme_choose(notifier: NotificationService, analyzer=None, search_service=None) -> Optional[str]:
+    """
+    获取市场热点题材，并分析相关的公司和行业的成长
+
+    Args:
+        notifier: 通知服务
+        analyzer: AI分析器（可选）
+        search_service: 搜索服务（可选）
+
+    Returns:
+        复盘报告文本
+    """
+    logger.info("热点题材分析开始执行")
+
+
+
+    logger.info("热点题材分析执行完毕")
+    return None
+
 def run_full_analysis(
     config: Config,
     args: argparse.Namespace,
