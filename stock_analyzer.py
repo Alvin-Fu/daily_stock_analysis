@@ -181,6 +181,7 @@ class StockTrendAnalyzer:
         
         # 获取最新数据
         latest = df.iloc[-1]
+        logger.info(latest)
         result.current_price = float(latest['close'])
         result.ma5 = float(latest['MA5'])
         result.ma10 = float(latest['MA10'])
@@ -227,7 +228,8 @@ class StockTrendAnalyzer:
         
         核心逻辑：判断均线排列和趋势强度
         """
-        ma5, ma10, ma20 = result.ma5, result.ma10, result.ma20
+        ma5, ma10, ma20, ma50, ma120, ma200 = result.ma5, result.ma10, result.ma20, result.ma50, result.ma120, result.ma200
+        logger.info("50日：%.2f 120日： %.2f， 200日： %.2f", ma50, ma120, ma200)
         
         # 判断均线排列
         if ma5 > ma10 > ma20:
