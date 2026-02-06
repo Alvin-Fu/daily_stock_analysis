@@ -199,6 +199,9 @@ class BaseFetcher(ABC):
         df['ma5'] = df['close'].rolling(window=5, min_periods=1).mean()
         df['ma10'] = df['close'].rolling(window=10, min_periods=1).mean()
         df['ma20'] = df['close'].rolling(window=20, min_periods=1).mean()
+        df['ma50'] = df['close'].rolling(window=50, min_periods=1).mean()
+        df['ma120'] = df['close'].rolling(window=120, min_periods=1).mean()
+        df['ma200'] = df['close'].rolling(window=200, min_periods=1).mean()
         
         # 量比：当日成交量 / 5日平均成交量
         avg_volume_5 = df['volume'].rolling(window=5, min_periods=1).mean()
@@ -206,9 +209,10 @@ class BaseFetcher(ABC):
         df['volume_ratio'] = df['volume_ratio'].fillna(1.0)
         
         # 保留2位小数
-        for col in ['ma5', 'ma10', 'ma20', 'volume_ratio']:
+        for col in ['ma5', 'ma10', 'ma20', 'ma50', 'ma120', 'ma200', 'volume_ratio']:
             if col in df.columns:
                 df[col] = df[col].round(2)
+                logging.warning(f"{col}线的均值{df[col]}")
         
         return df
     

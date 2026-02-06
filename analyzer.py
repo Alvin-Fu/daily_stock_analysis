@@ -67,9 +67,12 @@ class AnalysisResult:
     
     # ========== 核心指标 ==========
     sentiment_score: int  # 综合评分 0-100 (>70强烈看多, >60看多, 40-60震荡, <40看空)
+    peg: int  # 1正常估值，大于1高估，小于1低估
     trend_prediction: str  # 趋势预测：强烈看多/看多/震荡/看空/强烈看空
     operation_advice: str  # 操作建议：买入/加仓/持有/减仓/卖出/观望
     confidence_level: str = "中"  # 置信度：高/中/低
+
+    analysis_summary: str = ""
     
     # ========== 决策仪表盘 (新增) ==========
     dashboard: Optional[Dict[str, Any]] = None  # 完整的决策仪表盘数据
@@ -248,6 +251,10 @@ class GeminiAnalyzer:
 - 行业政策利空
 - 大额解禁
 
+### 6. 计算PEG
+- 根据PE和PB计算出对应的PEG
+- PEG=PE/PB计算出PEG为1位正常估值，大于1高估，小于1低估
+
 ## 输出格式：决策仪表盘 JSON
 
 请严格按照以下 JSON 格式输出，这是一个完整的【决策仪表盘】：
@@ -258,6 +265,7 @@ class GeminiAnalyzer:
     "trend_prediction": "强烈看多/看多/震荡/看空/强烈看空",
     "operation_advice": "买入/加仓/持有/减仓/卖出/观望",
     "confidence_level": "高/中/低",
+    “PEG”: 1,
     
     "dashboard": {
         "core_conclusion": {
