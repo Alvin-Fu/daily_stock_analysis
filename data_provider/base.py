@@ -193,7 +193,6 @@ class BaseFetcher(ABC):
         - MA5, MA10, MA20: 移动平均线
         - Volume_Ratio: 量比（今日成交量 / 5日平均成交量）
         """
-        logging.warning(f"{df}打印df信息")
         df = df.copy()
         
         # 移动平均线
@@ -203,10 +202,8 @@ class BaseFetcher(ABC):
         df['ma50'] = df['close'].rolling(window=50, min_periods=1).mean()
         df['ma120'] = df['close'].rolling(window=120, min_periods=1).mean()
         df['ma200'] = df['close'].rolling(window=200, min_periods=1).mean()
-        ma_value200 = df['close'].rolling(window=200, min_periods=1).mean()
-        logging.warning(f"{ma_value200}200天线")
-        logging.warning(f"{df['ma5']}均线 {df['ma120']}")
-        logging.warning(f"{df['close'].rolling(window=5, min_periods=1).mean()}5天线")
+        logging.warning(f"{df['ma200'][-10:]}200天线")
+        logging.warning(f"{df['ma5'][-10:]}均线")
         
         # 量比：当日成交量 / 5日平均成交量
         avg_volume_5 = df['volume'].rolling(window=5, min_periods=1).mean()
@@ -217,8 +214,6 @@ class BaseFetcher(ABC):
         for col in ['ma5', 'ma10', 'ma20', 'ma50', 'ma120', 'ma200', 'volume_ratio']:
             if col in df.columns:
                 df[col] = df[col].round(2)
-                logging.warning(f"{col}线的均值{df[col]}")
-        logging.warning(f"{df}打印df信息")
         return df
     
     @staticmethod
