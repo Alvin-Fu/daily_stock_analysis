@@ -52,7 +52,7 @@ from stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 from market_analyzer import MarketAnalyzer
 
 # 配置日志格式
-LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
+LOG_FORMAT = '%(asctime)s -%(filename)s:%(lineno)d [%(funcName)s] - %(levelname)s: %(message)s'
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 
