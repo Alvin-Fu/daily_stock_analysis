@@ -81,6 +81,9 @@ class StockDaily(Base):
     ma5 = Column(Float)
     ma10 = Column(Float)
     ma20 = Column(Float)
+    ma50 = Column(Float)
+    ma120 = Column(Float)
+    ma200 = Column(Float)
     volume_ratio = Column(Float)  # 量比
     
     # 数据来源
@@ -114,6 +117,9 @@ class StockDaily(Base):
             'ma5': self.ma5,
             'ma10': self.ma10,
             'ma20': self.ma20,
+            'ma50': self.ma50,
+            'ma120': self.ma120,
+            'ma200': self.ma200,
             'volume_ratio': self.volume_ratio,
             'data_source': self.data_source,
         }
@@ -350,6 +356,9 @@ class DatabaseManager:
                         existing.ma5 = row.get('ma5')
                         existing.ma10 = row.get('ma10')
                         existing.ma20 = row.get('ma20')
+                        existing.ma50 = row.get('ma50')
+                        existing.ma120 = row.get('ma120')
+                        existing.ma200 = row.get('ma200')
                         existing.volume_ratio = row.get('volume_ratio')
                         existing.data_source = data_source
                         existing.updated_at = datetime.now()
@@ -368,6 +377,10 @@ class DatabaseManager:
                             ma5=row.get('ma5'),
                             ma10=row.get('ma10'),
                             ma20=row.get('ma20'),
+                            ma50=row.get('ma50'),
+                            ma120=row.get('ma120'),
+                            ma200=row.get('ma200'),
+
                             volume_ratio=row.get('volume_ratio'),
                             data_source=data_source,
                         )
@@ -452,6 +465,9 @@ class DatabaseManager:
         ma5 = data.ma5 or 0
         ma10 = data.ma10 or 0
         ma20 = data.ma20 or 0
+        logger.warning(f"_analyze_ma_status5天{data.ma5}")
+        logger.warning(f"_analyze_ma_status50天{data.ma50}")
+        logger.warning(f"_analyze_ma_status120天{data.ma120}")
         
         if close > ma5 > ma10 > ma20 > 0:
             return "多头排列 📈"
