@@ -137,6 +137,7 @@ class BaseFetcher(ABC):
             raw_df = self._fetch_raw_data(stock_code, start_date, end_date)
             
             if raw_df is None or raw_df.empty:
+                logger.error(f"[{self.name}] 未获取到 {stock_code} 的数据")
                 raise DataFetchError(f"[{self.name}] 未获取到 {stock_code} 的数据")
             
             # Step 2: 标准化列名
@@ -341,7 +342,7 @@ class DataFetcherManager:
                     return df, fetcher.name
                     
             except Exception as e:
-                error_msg = f"[{fetcher.name}] 失败: {str(e)}"
+                error_msg = f"[{fetcher.name}] 失败: {str(e)} 开始时间{start_date} 结束时间{end_date}"
                 logger.warning(error_msg)
                 errors.append(error_msg)
                 # 继续尝试下一个数据源
