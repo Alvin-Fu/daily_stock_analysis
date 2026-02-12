@@ -100,7 +100,7 @@ class Config:
     log_level: str = "INFO"  # 日志级别
     
     # === 系统配置 ===
-    max_workers: int = 3  # 低并发防封禁
+    max_workers: int = 1  # 低并发防封禁
     debug: bool = False
     
     # === 定时任务配置 ===
