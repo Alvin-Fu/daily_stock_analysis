@@ -880,6 +880,9 @@ class GeminiAnalyzer:
 | MA5 | {today.get('ma5', 'N/A')} | 短期趋势线 |
 | MA10 | {today.get('ma10', 'N/A')} | 中短期趋势线 |
 | MA20 | {today.get('ma20', 'N/A')} | 中期趋势线 |
+| MA50 | {today.get('ma50', 'N/A')} | 中期趋势线 |
+| MA120 | {today.get('ma120', 'N/A')} | 中长期趋势线 |
+| MA200 | {today.get('ma200', 'N/A')} | 长期趋势线 |
 | 均线形态 | {context.get('ma_status', '未知')} | 多头/空头/缠绕 |
 """
         
