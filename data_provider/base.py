@@ -17,6 +17,7 @@
 import logging
 import random
 import time
+import sqlite3
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -39,6 +40,59 @@ logger = logging.getLogger(__name__)
 
 # === 标准化列名定义 ===
 STANDARD_COLUMNS = ['date', 'open', 'high', 'low', 'close', 'volume', 'amount', 'pct_chg']
+
+# # 数据库路径（SQLite）
+# DB_PATH = "stock_data.db"# 数据库路径（SQLite）
+#
+# # ===================== 数据库初始化 =====================
+# def init_database():
+#     """初始化数据库表：配置表+行情数据表"""
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+#
+#     # 1. 配置表：存储股票代码和时间间隔
+#     cursor.execute('''
+#     CREATE TABLE IF NOT EXISTS config (
+#         id INTEGER PRIMARY KEY AUTOINCREMENT,
+#         stock_codes TEXT NOT NULL,
+#         interval_seconds INTEGER NOT NULL DEFAULT 300,
+#         update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#     )
+#     ''')
+#
+#     # 2. 行情数据表：存储股票/ETF数据
+#     cursor.execute('''
+#     CREATE TABLE IF NOT EXISTS stock_etf_detail (
+#     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'Auto-increment primary key',
+#     code VARCHAR(20) NOT NULL COMMENT 'Stock/ETF code (e.g. 600519, 510300)',
+#     name VARCHAR(50) DEFAULT '' COMMENT 'Stock/ETF name',
+#     date DATE NOT NULL COMMENT 'Market date',
+#     open_price DECIMAL(10,2) DEFAULT NULL COMMENT 'Opening price (2 decimal places)',
+#     close_price DECIMAL(10,2) DEFAULT NULL COMMENT 'Closing price',
+#     high_price DECIMAL(10,2) DEFAULT NULL COMMENT 'Highest price',
+#     low_price DECIMAL(10,2) DEFAULT NULL COMMENT 'Lowest price',
+#     volume BIGINT UNSIGNED DEFAULT NULL COMMENT 'Trading volume (unsigned integer)',
+#     turnover DECIMAL(16,2) DEFAULT NULL COMMENT 'Trading turnover (amount)',
+#     amplitude DECIMAL(6,2) DEFAULT NULL COMMENT 'Amplitude (%)',
+#     price_change_pct DECIMAL(6,2) DEFAULT NULL COMMENT 'Price change percentage (%)',
+#     price_change DECIMAL(10,2) DEFAULT NULL COMMENT 'Price change amount',
+#     turnover_rate DECIMAL(6,2) DEFAULT NULL COMMENT 'Turnover rate (%)',
+#     etf_flag TINYINT(1) DEFAULT 0 COMMENT 'ETF flag: 0=stock, 1=ETF',
+#     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT 'Create time',
+#     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Update time',
+#     -- 主键和约束
+#     PRIMARY KEY (id),
+#     UNIQUE KEY uk_code_date (code, date),
+#     -- 索引优化
+#     KEY idx_code (code),
+#     KEY idx_date (date)
+# ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Stock/ETF detailed market data table';
+#     ''')
+#
+#     conn.commit()
+#     conn.close()
+#     print("数据库初始化完成")
+
 
 
 class DataFetchError(Exception):
