@@ -101,6 +101,7 @@ from sqlalchemy.orm import (
     Session,
 )
 from sqlalchemy.exc import IntegrityError
+from tushare import forecast_data
 
 from config import get_config
 
@@ -244,6 +245,141 @@ class StockDaily(Base):
             'ma200': self.ma200,
             'volume_ratio': self.volume_ratio,
             'data_source': self.data_source,
+        }
+
+
+# === 新增表1：股票基本信息表 ===
+class StockBasic(Base):
+    """
+    股票基本信息模型 - ORM映射类
+
+    数据库表: stock_basic
+    功能：存储股票基础属性（非行情类静态/低频更新数据）
+
+    设计原则：
+    1. 完整性：包含股票分析所需的核心基本信息
+    2. 唯一性：股票代码唯一标识一条记录
+    3. 可追溯：记录更新时间，便于数据审计
+    4. 高性能：code字段索引优化查询
+
+    字段说明：
+    • 核心标识：code（股票代码，唯一）
+    • 基础信息：name（股票名称）、industry（所属行业）、area（所属地域）
+    • 上市信息：list_date（上市日期）、market（市场类型：沪A/深A/创业板等）
+    • 财务简讯：total_share（总股本）、circulating_share（流通股本）
+    • 元数据：updated_at（最后更新时间）
+    """
+    __tablename__ = 'stock_basic'
+
+    # 字段定义
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, unique=True, index=True)  # 股票代码（唯一）
+    name = Column(String(50), nullable=False)  # 股票名称（如：贵州茅台）
+    industry = Column(String(50))  # 所属行业（如：白酒、半导体）
+    list_date = Column(Date)  # 上市日期（YYYY-MM-DD）
+    market = Column(String(10))  # 市场类型（沪A/深A/创业板/科创板）
+    total_share = Column(Float)  # 总股本（亿股）
+    circulating_share = Column(Float)  # 流通股本（亿股）
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)  # 最后更新时间
+
+    def __repr__(self):
+        return f"<StockBasic(code={self.code}, name={self.name}, industry={self.industry})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，便于数据交互"""
+        return {
+            'code': self.code,
+            'name': self.name,
+            'industry': self.industry,
+            'list_date': self.list_date,
+            'market': self.market,
+            'total_share': self.total_share,
+            'circulating_share': self.circulating_share,
+            'updated_at': self.updated_at
+        }
+
+# === 当天预测的数据
+class DailyForecast(Base):
+    __tablename__ = 'daily_forecast'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, unique=True, index=True)
+    forecast_date = Column(Date, nullable=False, unique=True, index=True)
+    forecast_rue = Column(String, nullable=False)
+    practice_rue = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    # 复合约束与索引（核心：股票+日期唯一）
+    __table_args__ = (
+        UniqueConstraint('code', 'forecast_date', name='uix_daily_forecast_code_date'),
+        Index('ix_daily_forecast_code_date', 'code', 'forecast_date'),
+    )
+
+    def __repr__(self):
+        return f"<StockMoneyFlow(code={self.code}, date={self.date}, main_inflow={self.main_inflow})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，便于数据交互"""
+        return {
+            'code': self.code,
+            'forecast_date': self.forecast_date,
+            'forecast_rue': self.forecast_rue,
+            'practice_rue': self.practice_rue,
+        }
+
+
+# === 新增表2：股票资金流向表 ===
+class StockMoneyFlow(Base):
+    """
+    股票资金流向模型 - ORM映射类
+
+    数据库表: stock_money_flow
+    功能：存储每日资金流向数据（主力/散户/北向资金等）
+
+    设计原则：
+    1. 完整性：包含资金分析核心维度
+    2. 唯一性：(code, date)复合唯一约束
+    3. 可追溯：记录数据来源和更新时间
+    4. 高性能：(code, date)复合索引优化查询
+
+    字段说明：
+    • 标识字段：code（股票代码）、date（交易日期）
+    • 资金数据：main_inflow（主力净流入）、retail_inflow（散户净流入）、north_inflow（北向资金净流入）
+    • 占比数据：main_ratio（主力资金占比）、retail_ratio（散户资金占比）
+    • 元数据：data_source（数据来源）、updated_at（更新时间）
+    """
+    __tablename__ = 'stock_money_flow'
+
+    # 字段定义
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, index=True)  # 股票代码
+    date = Column(Date, nullable=False, index=True)  # 交易日期
+    main_inflow = Column(Float)  # 主力资金净流入（万元）
+    retail_inflow = Column(Float)  # 散户资金净流入（万元）
+    north_inflow = Column(Float)  # 北向资金净流入（万元）
+    main_ratio = Column(Float)  # 主力资金占比（%）
+    retail_ratio = Column(Float)  # 散户资金占比（%）
+    data_source = Column(String(50))  # 数据来源（如：EastMoneyFetcher）
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 复合约束与索引（核心：股票+日期唯一）
+    __table_args__ = (
+        UniqueConstraint('code', 'date', name='uix_money_flow_code_date'),
+        Index('ix_money_flow_code_date', 'code', 'date'),
+    )
+
+    def __repr__(self):
+        return f"<StockMoneyFlow(code={self.code}, date={self.date}, main_inflow={self.main_inflow})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，便于数据交互"""
+        return {
+            'code': self.code,
+            'date': self.date,
+            'main_inflow': self.main_inflow,
+            'retail_inflow': self.retail_inflow,
+            'north_inflow': self.north_inflow,
+            'main_ratio': self.main_ratio,
+            'retail_ratio': self.retail_ratio,
+            'data_source': self.data_source
         }
 
 
@@ -1170,18 +1306,27 @@ class DatabaseManager:
         ma5 = data.ma5 or 0         # 5日移动平均线
         ma10 = data.ma10 or 0       # 10日移动平均线
         ma20 = data.ma20 or 0       # 20日移动平均线
+        ma50 = data.ma50 or 0       # 50日移动平均线
+        ma120 = data.ma120 or 0     # 120日移动平均线
+        ma200 = data.ma200 or 0     # 200日移动平均线
         
         # 调试日志：记录均线值（用于问题排查）
         # 注意：这里使用warning级别，生产环境可改为debug
-        logger.debug(f"_analyze_ma_status - Close:{close}, MA5:{ma5}, MA10:{ma10}, MA20:{ma20}")
+        logger.debug(f"_analyze_ma_status - Close:{close}, MA5:{ma5}, MA10:{ma10}, MA20:{ma20} "
+                     f"MA50:{ma50} MA120:{ma120} MA200:{ma200}")
         
         # 步骤2：判断均线形态（按优先级）
         
         # 条件1：多头排列（最强看涨信号）
         # 标准：价格 > MA5 > MA10 > MA20 > 0
         # > 0 检查确保均线值为正数（避免除零或无效数据）
-        if close > ma5 > ma10 > ma20 > 0:
-            return "多头排列 📈"          # 强烈看涨，趋势明确
+        if ma200 > 0 and close > ma5 > ma10 > ma20 > ma120 > ma200 > 0:
+            return "多头排列 📈长期看涨"
+        if ma120 > 0 and close > ma5 > ma10 > ma20 > ma120 > 0:
+            return "多头排列 📈中长期看涨"
+
+        if close > ma5 > ma10 > ma20 > ma120 > ma200 > 0:
+            return "多头排列 📈中期看涨"          # 强烈看涨，趋势明确
         
         # 条件2：空头排列（最强看跌信号）
         # 标准：价格 < MA5 < MA10 < MA20 且 MA20 > 0

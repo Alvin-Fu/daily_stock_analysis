@@ -210,6 +210,37 @@ class BaseFetcher(ABC):
             logger.error(f"[{self.name}] 获取 {stock_code} 失败: {str(e)}")
             raise DataFetchError(f"[{self.name}] {stock_code}: {str(e)}") from e
 
+    def get_weekly_data(
+        self, stock_code: str, start_date: str, end_date: str,
+        days: int = 30
+    ) -> pd.DataFrame:
+        """
+        获取周线数据（统一入口）
+
+        流程：
+        1. 计算日期范围
+        2. 调用子类获取原始数据
+        3. 标准化列名
+        4. 计算技术指标
+
+        Args:
+            stock_code: 股票代码
+            start_date: 开始日期（可选）
+            end_date: 结束日期（可选，默认今天）
+            days: 获取天数（当 start_date 未指定时使用）
+
+        Returns:
+            标准化的 DataFrame，包含技术指标
+        """
+        # 计算日期范围
+        if end_date is None:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+        if start_date is None:
+            start_date = get_start_date(stock_code, end_date, days)
+        try:
+            self.tushare_fetcher
+
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         数据清洗
@@ -333,9 +364,9 @@ class DataFetcherManager:
         from .yfinance_fetcher import YfinanceFetcher
         
         self._fetchers = [
-            EfinanceFetcher(),   # 最高优先级
-            AkshareFetcher(),
+            AkshareFetcher(),  # 最高优先级
             TushareFetcher(),
+            EfinanceFetcher(),
             BaostockFetcher(),
             YfinanceFetcher(),
         ]

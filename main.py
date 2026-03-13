@@ -85,6 +85,8 @@ A股自选股智能分析系统 - 主调度程序
 """
 import os
 
+from daily_stock_analysis.data_provider import TushareFetcher
+
 # 代理配置 - 仅在本地环境使用，GitHub Actions 不需要
 if os.getenv("GITHUB_ACTIONS") != "true":
     # 本地开发环境，如需代理请取消注释或修改端口
@@ -112,6 +114,7 @@ from notification import NotificationService, NotificationChannel, send_daily_re
 from search_service import SearchService, SearchResponse
 from stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 from market_analyzer import MarketAnalyzer
+from data.sqlite import SQLiteDB
 
 # 配置日志格式
 LOG_FORMAT = '%(asctime)s -%(filename)s:%(lineno)d [%(funcName)s] - %(levelname)s: %(message)s'
@@ -450,6 +453,7 @@ class StockAnalysisPipeline:
         """
         # 步骤1：加载配置（支持自定义配置和全局配置）
         self.config = config or get_config()
+        self.db
         
         # 步骤2：设置并发数（支持参数覆盖配置）
         self.max_workers = max_workers or self.config.max_workers
@@ -459,10 +463,12 @@ class StockAnalysisPipeline:
         
         # 步骤4：初始化数据源管理器（多数据源调度）
         self.fetcher_manager = DataFetcherManager()
-        
+
         # 步骤5：初始化增强数据获取器（实时行情、量比、筹码）
         self.akshare_fetcher = AkshareFetcher()  # 用于获取增强数据（量比、筹码等）
-        
+
+        self.tushare_fetcher = TushareFetcher()
+
         # 步骤6：初始化趋势分析器（技术分析，MA多头判断）
         self.trend_analyzer = StockTrendAnalyzer()  # 趋势分析器
         
