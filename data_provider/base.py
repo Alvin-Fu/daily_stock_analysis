@@ -210,37 +210,6 @@ class BaseFetcher(ABC):
             logger.error(f"[{self.name}] 获取 {stock_code} 失败: {str(e)}")
             raise DataFetchError(f"[{self.name}] {stock_code}: {str(e)}") from e
 
-    def get_weekly_data(
-        self, stock_code: str, start_date: str, end_date: str,
-        days: int = 30
-    ) -> pd.DataFrame:
-        """
-        获取周线数据（统一入口）
-
-        流程：
-        1. 计算日期范围
-        2. 调用子类获取原始数据
-        3. 标准化列名
-        4. 计算技术指标
-
-        Args:
-            stock_code: 股票代码
-            start_date: 开始日期（可选）
-            end_date: 结束日期（可选，默认今天）
-            days: 获取天数（当 start_date 未指定时使用）
-
-        Returns:
-            标准化的 DataFrame，包含技术指标
-        """
-        # 计算日期范围
-        if end_date is None:
-            end_date = datetime.now().strftime('%Y-%m-%d')
-
-        if start_date is None:
-            start_date = get_start_date(stock_code, end_date, days)
-        try:
-            self.tushare_fetcher
-
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         数据清洗
@@ -280,6 +249,7 @@ class BaseFetcher(ABC):
         - Volume_Ratio: 量比（今日成交量 / 5日平均成交量）
         """
         df = df.copy()
+        df = self._calculate_macd_signal(df)
         
         # 移动平均线
         df['ma5'] = df['close'].rolling(window=5, min_periods=1).mean()
@@ -295,11 +265,31 @@ class BaseFetcher(ABC):
         avg_volume_5 = df['volume'].rolling(window=5, min_periods=1).mean()
         df['volume_ratio'] = df['volume'] / avg_volume_5.shift(1)
         df['volume_ratio'] = df['volume_ratio'].fillna(1.0)
-        
+        for period in [5, 10, 20, 50, 120, 200]:
+            df[f'sma_{period}'] = df['close'].ewm(
+                span=period, adjust=False
+            ).mean().round(2)
         # 保留2位小数
         for col in ['ma5', 'ma10', 'ma20', 'ma50', 'ma120', 'ma200', 'volume_ratio']:
             if col in df.columns:
                 df[col] = df[col].round(2)
+        return df
+
+    def _calculate_macd_signal(
+        self, df: pd.DataFrame,
+        short_window=12, long_window=26, signal_window=9) -> pd.DataFrame:
+        """计算MACD的信号"""
+        df = df.copy()
+
+        df['EMA_short'] = df['close'].ewm(span=short_window, adjust=False).mean()
+        df['EMA_long'] = df['close'].ewm(span=long_window, adjust=False).mean()
+        df['DIF'] = df['EMA_short'] - df['EMA_long']  # 快线
+        df['DEA'] = df['DIF'].ewm(span=signal_window, adjust=False).mean()
+        df['MACD'] = df['DIF'] - df['DEA']
+        # 计算交叉点
+        df['macd_signal'] = 0
+        df.loc[(df['DIF'].shift(1) <= df['DEA'].shift(1)) & (df['DIF'] > df['DEA']), 'macd_signal'] = 1
+        df.loc[(df['DIF'].shift(1) >= df['DEA'].shift(1)) & (df['DIF'] < df['DEA']), 'macd_signal'] = -1
         return df
     
     @staticmethod

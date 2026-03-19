@@ -53,7 +53,7 @@ class TushareFetcher(BaseFetcher):
     """
     
     name = "TushareFetcher"
-    priority = 2
+    priority = 0
     
     def __init__(self, rate_limit_per_minute: int = 200):
         """

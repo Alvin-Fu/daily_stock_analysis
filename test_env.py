@@ -26,8 +26,7 @@ os.environ["https_proxy"] = "http://127.0.0.1:10809"
 import argparse
 import logging
 import sys
-from datetime import datetime, date, timedelta
-from typing import Optional
+from datetime import datetime, date
 
 # 配置日志
 logging.basicConfig(
@@ -91,7 +90,7 @@ def view_database():
     """查看数据库内容"""
     print_header("2. 数据库内容查看")
     
-    from storage import get_db
+    from databaset.storage import get_db
     from sqlalchemy import text
     
     db = get_db()
@@ -397,7 +396,7 @@ def query_stock_data(stock_code: str, days: int = 10):
     """查询指定股票的数据"""
     print_header(f"查询股票数据: {stock_code}")
     
-    from storage import get_db
+    from databaset.storage import get_db
     from sqlalchemy import text
     
     db = get_db()

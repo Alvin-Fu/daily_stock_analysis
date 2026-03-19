@@ -3,10 +3,8 @@ import akshare as ak
 import pandas as pd
 
 from datetime import datetime, timedelta
-from .sqlite import SQLiteDB
 
 def get_start_date(stock_code, end_date: str, days: int) -> str:
-    SQLiteDB()
     # 获取接口返回的上市时间
     def _get_listing_date(code):
         info_df = ak.stock_individual_info_em(symbol=code)

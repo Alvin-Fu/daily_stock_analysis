@@ -44,8 +44,7 @@ AkshareFetcher - 主数据源 (Priority 1)
 import logging
 import random
 import time
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
 import pandas as pd
@@ -58,7 +57,6 @@ from tenacity import (
 )
 
 from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
-from ..storage import get_db, DatabaseManager
 
 
 @dataclass
@@ -938,160 +936,6 @@ class AkshareFetcher(BaseFetcher):
         except Exception as e:
             logger.error(f"[API错误] 获取 {stock_code} 筹码分布失败: {e}")
             return None
-    
-    def _get_latest_date_in_db(self, stock_code: str) -> Optional[str]:
-        """
-        从数据库中获取指定股票的最新日期
-        
-        Args:
-            stock_code: 股票代码
-            
-        Returns:
-            最新日期字符串 (YYYY-MM-DD)，如果没有记录则返回None
-        """
-        try:
-            db = get_db()
-            # 使用DatabaseManager查询最新日期
-            latest_data = db.get_latest_data(stock_code)
-            if latest_data:
-                # latest_data是一个StockDaily对象，date属性是datetime.date对象
-                latest_date = latest_data.date.strftime('%Y-%m-%d')
-                logger.info(f"[{stock_code}] 数据库中最新日期: {latest_date}")
-                return latest_date
-            else:
-                logger.info(f"[{stock_code}] 数据库中没有该股票数据")
-                return None
-        except Exception as e:
-            logger.error(f"[{stock_code}] 查询数据库最新日期失败: {e}")
-            return None
-    
-    def _save_to_database(self, df: pd.DataFrame, stock_code: str, source_name: str = "akshare") -> int:
-        """
-        将数据保存到数据库，使用日期+股票代码作为主键
-        
-        Args:
-            df: 标准化后的DataFrame，包含日期和行情数据
-            stock_code: 股票代码
-            source_name: 数据源名称
-            
-        Returns:
-            保存的记录数
-        """
-        try:
-            db = get_db()
-            saved_count = db.save_daily_data(df, stock_code, source_name)
-            logger.info(f"[{stock_code}] 保存 {saved_count} 条数据到数据库")
-            return saved_count
-        except Exception as e:
-            logger.error(f"[{stock_code}] 保存数据到数据库失败: {e}")
-            return 0
-    
-    def get_daily_data(
-        self, 
-        stock_code: str, 
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
-        days: int = 30
-    ) -> pd.DataFrame:
-        """
-        获取日线数据（增量获取版本）
-        
-        增量获取策略：
-        1. 查询数据库中该股票的最新日期
-        2. 如果数据库中有数据，则从最新日期+1天开始获取（增量）
-        3. 如果数据库中无数据，则获取全量数据
-        4. 获取成功后自动保存到数据库
-        5. 使用日期+股票代码作为主键（数据库层已实现）
-        
-        Args:
-            stock_code: 股票代码
-            start_date: 开始日期（可选，由增量逻辑决定）
-            end_date: 结束日期（可选，默认今天）
-            days: 获取天数（当start_date未指定且无历史数据时使用）
-            
-        Returns:
-            标准化的DataFrame，包含技术指标
-        """
-        from datetime import datetime, timedelta
-        
-        # 确定结束日期
-        if end_date is None:
-            end_date = datetime.now().strftime('%Y-%m-%d')
-        
-        # 查询数据库中的最新日期
-        latest_date = self._get_latest_date_in_db(stock_code)
-        
-        # 确定开始日期（增量获取逻辑）
-        original_start_date = start_date  # 保存原始参数用于日志
-        if latest_date:
-            # 数据库中有数据，从最新日期的下一天开始获取
-            latest_dt = datetime.strptime(latest_date, '%Y-%m-%d')
-            next_day = latest_dt + timedelta(days=1)
-            incremental_start_date = next_day.strftime('%Y-%m-%d')
-            
-            # 如果增量开始日期晚于结束日期，则无需获取新数据
-            if incremental_start_date > end_date:
-                logger.info(f"[{stock_code}] 数据库数据已是最新，无需获取新数据（最新日期: {latest_date}）")
-                # 从数据库读取现有数据返回
-                try:
-                    db = get_db()
-                    # 获取最近days天的数据
-                    context = db.get_analysis_context(stock_code)
-                    if context and 'raw_data' in context:
-                        import pandas as pd
-                        raw_data = context['raw_data']
-                        if isinstance(raw_data, list) and len(raw_data) > 0:
-                            df = pd.DataFrame(raw_data)
-                            # 确保日期格式正确
-                            if 'date' in df.columns:
-                                df['date'] = pd.to_datetime(df['date'])
-                            return df
-                except Exception as e:
-                    logger.warning(f"[{stock_code}] 从数据库读取数据失败，将尝试重新获取: {e}")
-            
-            # 使用增量开始日期，但也要考虑用户指定的start_date
-            if start_date is None:
-                start_date = incremental_start_date
-            else:
-                # 如果用户指定了更早的start_date，则使用用户指定的（可能需要补全数据）
-                user_start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-                if user_start_dt < latest_dt:
-                    # 用户要求获取比数据库更早的数据，保留原start_date
-                    logger.info(f"[{stock_code}] 用户要求获取更早的数据（{start_date} < {latest_date}），将获取全量数据")
-                else:
-                    # 用户指定的日期在最新日期之后，使用用户指定的日期
-                    start_date = incremental_start_date if incremental_start_date > start_date else start_date
-        else:
-            # 数据库中没有数据，全量获取
-            logger.info(f"[{stock_code}] 数据库中没有历史数据，进行全量获取")
-        
-        # 记录增量获取信息
-        if latest_date:
-            logger.info(f"[{stock_code}] 增量获取: 数据库最新日期={latest_date}, 开始日期={start_date}, 结束日期={end_date}")
-        else:
-            logger.info(f"[{stock_code}] 全量获取: 开始日期={start_date}, 结束日期={end_date}, 天数={days}")
-        
-        # 调用父类的get_daily_data获取数据
-        try:
-            df = super().get_daily_data(
-                stock_code=stock_code,
-                start_date=start_date,
-                end_date=end_date,
-                days=days
-            )
-            
-            if df is not None and not df.empty:
-                # 保存数据到数据库
-                saved_count = self._save_to_database(df, stock_code, self.name)
-                logger.info(f"[{stock_code}] 数据获取并保存完成，新增 {saved_count} 条记录")
-            else:
-                logger.warning(f"[{stock_code}] 获取到的数据为空")
-            
-            return df
-            
-        except Exception as e:
-            logger.error(f"[{stock_code}] 增量获取数据失败: {e}")
-            raise
     
     def get_enhanced_data(self, stock_code: str, days: int = 60) -> Dict[str, Any]:
         """

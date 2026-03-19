@@ -75,7 +75,7 @@ A股自选股智能分析系统 - 配置管理模块
 作者：ZhuLinsen
 仓库：https://github.com/ZhuLinsen/daily_stock_analysis
 """
-
+import logging
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -849,6 +849,7 @@ class Config:
         # 使用python-dotenv加载项目根目录下的.env文件
         # 注意：load_dotenv不会覆盖已存在的环境变量
         env_path = Path(__file__).parent / '.env'
+        logging.warn(f"path {env_path}")
         load_dotenv(dotenv_path=env_path)
         
         # 步骤2：解析自选股列表（逗号分隔，必需配置）

@@ -85,7 +85,7 @@ A股自选股智能分析系统 - 主调度程序
 """
 import os
 
-from daily_stock_analysis.data_provider import TushareFetcher
+
 
 # 代理配置 - 仅在本地环境使用，GitHub Actions 不需要
 if os.getenv("GITHUB_ACTIONS") != "true":
@@ -106,15 +106,16 @@ from typing import List, Dict, Any, Optional, Tuple
 from feishu_doc import FeishuDocManager
 
 from config import get_config, Config
-from storage import get_db, DatabaseManager
+from storage import get_db
 from data_provider import DataFetcherManager
+from data_provider.tushare_fetcher import TushareFetcher
 from data_provider.akshare_fetcher import AkshareFetcher, RealtimeQuote, ChipDistribution
 from analyzer import GeminiAnalyzer, AnalysisResult, STOCK_NAME_MAP
-from notification import NotificationService, NotificationChannel, send_daily_report
-from search_service import SearchService, SearchResponse
+from notification import NotificationService, NotificationChannel
+from search_service import SearchService
 from stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 from market_analyzer import MarketAnalyzer
-from data.sqlite import SQLiteDB
+
 
 # 配置日志格式
 LOG_FORMAT = '%(asctime)s -%(filename)s:%(lineno)d [%(funcName)s] - %(levelname)s: %(message)s'
@@ -453,7 +454,6 @@ class StockAnalysisPipeline:
         """
         # 步骤1：加载配置（支持自定义配置和全局配置）
         self.config = config or get_config()
-        self.db
         
         # 步骤2：设置并发数（支持参数覆盖配置）
         self.max_workers = max_workers or self.config.max_workers
