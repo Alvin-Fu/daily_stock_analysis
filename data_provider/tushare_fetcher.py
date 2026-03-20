@@ -30,10 +30,14 @@ from tenacity import (
 )
 
 from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
-from config import get_config
 
 logger = logging.getLogger(__name__)
 
+tushare_token = ""
+
+def set_tushare_token(token: str):
+    global tushare_token
+    tushare_token = token
 
 class TushareFetcher(BaseFetcher):
     """
@@ -76,9 +80,8 @@ class TushareFetcher(BaseFetcher):
         
         如果 Token 未配置，此数据源将不可用
         """
-        config = get_config()
         
-        if not config.tushare_token:
+        if not tushare_token:
             logger.warning("Tushare Token 未配置，此数据源不可用")
             return
         
@@ -86,7 +89,7 @@ class TushareFetcher(BaseFetcher):
             import tushare as ts
             
             # 设置 Token
-            ts.set_token(config.tushare_token)
+            ts.set_token(tushare_token)
             
             # 获取 API 实例
             self._api = ts.pro_api()
@@ -153,8 +156,9 @@ class TushareFetcher(BaseFetcher):
         Returns:
             Tushare 格式代码，如 '600519.SH', '000001.SZ'
         """
+        logger.info(f"stock code[{stock_code}]")
         code = stock_code.strip()
-        
+        logger.info(f"stock code[{code}]")
         # 已经包含后缀的情况
         if '.' in code:
             return code.upper()
@@ -189,12 +193,13 @@ class TushareFetcher(BaseFetcher):
         3. 转换股票代码格式
         4. 调用 API 获取数据
         """
+        logger.info("使用tushare")
         if self._api is None:
             raise DataFetchError("Tushare API 未初始化，请检查 Token 配置")
 
-        ts_code, ts_start, ts_end = self.fetch_common(self, stock_code, start_date, end_date)
+        ts_code, ts_start, ts_end = self.fetch_common(stock_code, start_date, end_date)
         
-        logger.debug(f"调用 Tushare daily({ts_code}, {ts_start}, {ts_end})")
+        logger.info(f"调用 Tushare daily[{ts_code}, {ts_start}, {ts_end}]")
         
         try:
             # 调用 daily 接口获取日线数据
@@ -213,7 +218,7 @@ class TushareFetcher(BaseFetcher):
             if any(keyword in error_msg for keyword in ['quota', '配额', 'limit', '权限']):
                 logger.warning(f"Tushare 配额可能超限: {e}")
                 raise RateLimitError(f"Tushare 配额超限: {e}") from e
-            
+            logger.error(f"tushare 获取数据失败[{e}]")
             raise DataFetchError(f"Tushare 获取数据失败: {e}") from e
     
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
@@ -256,8 +261,26 @@ class TushareFetcher(BaseFetcher):
         keep_cols = ['code'] + STANDARD_COLUMNS
         existing_cols = [col for col in keep_cols if col in df.columns]
         df = df[existing_cols]
-        
+        logger.info(f"thshare _normalize_data")
         return df
+
+    def get_stock_basic(self) -> pd.DataFrame:
+        """获取股票基础信息"""
+        # 转换代码格式
+        try:
+            # 获取股票的基础数据
+            df = ts.pro_api().stock_basic()
+            return df
+
+        except Exception as e:
+            error_msg = str(e).lower()
+
+            # 检测配额超限
+            if any(keyword in error_msg for keyword in ['quota', '配额', 'limit', '权限']):
+                logger.warning(f"Tushare 配额可能超限: {e}")
+                raise RateLimitError(f"Tushare 配额超限: {e}") from e
+
+            raise DataFetchError(f"Tushare 获取数据失败: {e}") from e
 
     def fetch_common(self, stock_code: str, start_date: str, end_date: str):
         # 速率限制检查
@@ -265,12 +288,13 @@ class TushareFetcher(BaseFetcher):
 
         # 转换代码格式
         ts_code = self._convert_stock_code(stock_code)
+        logger.info(f"ts code: [{ts_code}, {start_date}, {end_date}, {type(start_date)}]")
 
         # 转换日期格式（Tushare 要求 YYYYMMDD）
         ts_start = start_date.replace('-', '')
         ts_end = end_date.replace('-', '')
 
-        logger.debug(f"调用 Tushare daily({ts_code}, {ts_start}, {ts_end})")
+        logger.info(f"调用 Tushare daily[{ts_code}, {ts_start}, {ts_end}]")
         return ts_code, ts_start, ts_end
 
     def fetch_raw_weekly_month_data(self, stock_code: str, start_date: str, end_date: str, freq: str) -> pd.DataFrame:
@@ -302,6 +326,39 @@ class TushareFetcher(BaseFetcher):
                 raise RateLimitError(f"Tushare 配额超限: {e}") from e
 
             raise DataFetchError(f"Tushare 获取数据失败: {e}") from e
+
+    def stock_daily_basic(self, stock_code: str, trade_date: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """每日指标
+            stock_code 和 trade_date二选一
+        """
+        if self._api is None:
+            raise DataFetchError("Tushare API 未初始化，请检查 Token 配置")
+
+        t_date = trade_date.replace('-', '')
+
+        ts_code, ts_start, ts_end = self.fetch_common(stock_code, start_date, end_date)
+        try:
+            df = ts.pro_api().daily_basic(
+                ts_code=ts_code,
+                trade_date=t_date,
+                start_date=ts_start,
+                end_date=ts_end,
+            )
+            if df.empty:
+                return pd.DataFrame()
+            return df
+        except Exception as e:
+            error_msg = str(e).lower()
+
+            # 检测配额超限
+            if any(keyword in error_msg for keyword in ['quota', '配额', 'limit', '权限']):
+                logger.warning(f"Tushare 配额可能超限: {e}")
+                raise RateLimitError(f"Tushare 配额超限: {e}") from e
+
+            raise DataFetchError(f"Tushare stk daily basic err: {e}") from e
+
+
+
 
     def stk_holdertrade(self, stock_code: str, ann_date, start_date: str, end_date: str)  -> pd.DataFrame:
         """

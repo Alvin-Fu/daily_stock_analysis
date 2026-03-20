@@ -32,7 +32,6 @@ from tenacity import (
     retry_if_exception_type,
 )
 
-from .start_date import get_start_date
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -180,9 +179,11 @@ class BaseFetcher(ABC):
         # 计算日期范围
         if end_date is None:
             end_date = datetime.now().strftime('%Y-%m-%d')
+            logger.info(f"end date{end_date}, start date{start_date}")
         
         if start_date is None:
-            start_date = get_start_date(stock_code, end_date, days)
+            start_date = datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=days * 2)
+            logger.info(f"start data{start_date}")
         
         logger.info(f"[{self.name}] 获取 {stock_code} 数据: {start_date} ~ {end_date}")
         
@@ -237,7 +238,7 @@ class BaseFetcher(ABC):
         
         # 按日期升序排序
         df = df.sort_values('date', ascending=True).reset_index(drop=True)
-        
+        logger.info(f"clean data success")
         return df
     
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -273,6 +274,7 @@ class BaseFetcher(ABC):
         for col in ['ma5', 'ma10', 'ma20', 'ma50', 'ma120', 'ma200', 'volume_ratio']:
             if col in df.columns:
                 df[col] = df[col].round(2)
+        logger.info(f"calculate indicators success")
         return df
 
     def _calculate_macd_signal(

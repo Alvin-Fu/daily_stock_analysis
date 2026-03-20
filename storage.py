@@ -302,7 +302,7 @@ class StockWeekly(Base):
 
         示例：<StockDaily(code=600519, date=2026-01-15, close=1820.0)>
         """
-        return f"<StockDaily(code={self.code}, date={self.date}, close={self.close})>"
+        return f"<StockWeekly(code={self.code}, date={self.date}, close={self.close})>"
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -452,9 +452,9 @@ class StockMonth(Base):
         """
         对象字符串表示，用于调试和日志输出
 
-        示例：<StockDaily(code=600519, date=2026-01-15, close=1820.0)>
+        示例：<StockMonth(code=600519, date=2026-01-15, close=1820.0)>
         """
-        return f"<StockDaily(code={self.code}, date={self.date}, close={self.close})>"
+        return f"<StockMonth(code={self.code}, date={self.date}, close={self.close})>"
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -526,8 +526,7 @@ class StockBasic(Base):
     industry = Column(String(50))  # 所属行业（如：白酒、半导体）
     list_date = Column(Date)  # 上市日期（YYYY-MM-DD）
     market = Column(String(10))  # 市场类型（沪A/深A/创业板/科创板）
-    total_share = Column(Float)  # 总股本（亿股）
-    circulating_share = Column(Float)  # 流通股本（亿股）
+    list_status = Column(String(10))  # 上市状态，L上市，D退市，G过会未交易，P暂停上市
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)  # 最后更新时间
     # ===== 数据库约束和索引 =====
     # 唯一约束：确保同一股票同一日期只有一条记录，防止数据重复
@@ -549,11 +548,71 @@ class StockBasic(Base):
             'industry': self.industry,
             'list_date': self.list_date,
             'market': self.market,
-            'total_share': self.total_share,
-            'circulating_share': self.circulating_share,
-            'updated_at': self.updated_at
+            'updated_at': self.updated_at,
+            'list_status': self.list_status,
         }
 
+class StockDailyBasic(Base):
+    """股票每日指标数据"""
+    __tablename__ = 'stock_daily_basic'
+
+    # ===== 标识字段 =====
+    # 主键：自增整数，用于数据库内部标识
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 股票代码：A股6位数字代码，如600519(茅台)、000001(平安银行)
+    # 建立索引优化按代码查询的性能
+    code = Column(String(10), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    close = Column(Float, nullable=False)
+    turnover_rate = Column(Float, nullable=False) # 换手率
+    turnover_rate_f = Column(Float, nullable=False)  # 换手率（自由流通股）
+    volume_ratio =  Column(Float, nullable=False)   # 量比
+    pe = Column(Float, nullable=False)   # 市盈率
+    pe_ttm = Column(Float, nullable=False)  # 静态市盈率
+    pb = Column(Float, nullable=False)  # 市净率
+    ps = Column(Float, nullable=False)  # 市销率
+    ps_ttm = Column(Float, nullable=False)  #
+    dv_ratio = Column(Float, nullable=False)  # 股息率
+    dv_ttm = Column(Float, nullable=False)  # ttm
+    total_share = Column(Float, nullable=False)  # 总股本（万股）
+    float_share = Column(Float, nullable=False)  # 流通股本
+    free_share = Column(Float, nullable=False)  # 自由流通股本
+    total_mv = Column(Float, nullable=False)  # 总市值（万元）
+    circ_mv = Column(Float, nullable=False)  # 流通市值
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)  # 最后更新时间
+    # ===== 数据库约束和索引 =====
+    # 唯一约束：确保同一股票同一日期只有一条记录，防止数据重复
+    # 复合索引：优化按股票代码和日期组合查询的性能
+    __table_args__ = (
+        UniqueConstraint('code', 'trade_date', name='uix_stock_daily_basic'),
+        Index('idx_daily_basic_code_date', 'code', 'trade_date'),
+    )
+
+    def __repr__(self):
+        return f"<StockDailyBasic(code={self.code}, trade_date={self.trade_date})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，便于数据交互"""
+        return {
+            'code': self.code,
+            'trade_date': self.trade_date,
+            'close': self.close,
+            'turnover_rate': self.turnover_rate,
+            'turnover_rate_f': self.turnover_rate_f,
+            'volume_ratio': self.volume_ratio,
+            'pe': self.pe,
+            'pe_ttm': self.pe_ttm,
+            'pb': self.pb,
+            'ps': self.ps,
+            'ps_ttm': self.ps_ttm,
+            'dv_ratio': self.dv_ratio,
+            'dv_ttm': self.dv_ttm,
+            'total_share': self.total_share,
+            'float_share': self.float_share,
+            'total_mv': self.total_mv,
+            'circ_mv': self.circ_mv,
+        }
 
 # === 当天预测的数据
 class DailyForecast(Base):
@@ -572,7 +631,7 @@ class DailyForecast(Base):
     )
 
     def __repr__(self):
-        return f"<StockMoneyFlow(code={self.code}, date={self.date}, main_inflow={self.main_inflow})>"
+        return f"<DailyForecast(code={self.code}, forecast_date={self.forecast_date})>"
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式，便于数据交互"""
@@ -995,6 +1054,207 @@ class DatabaseManager:
             ).scalars_one_or_none()
             return list(results)
 
+    def get_stock_basic(self, code: str) -> StockBasic:
+        """获取股票的基本信息"""
+        if code is None:
+            logger.error(f"code is null")
+            return None
+
+        with self.get_session() as session:
+            result = session.execute(
+                select(StockBasic).where(
+                    StockBasic.code == code
+                )
+            ).scalar_one_or_none()
+            return result
+
+
+    def save_stock_basic(self, df: pd.DataFrame) -> int:
+        """存储股票基本数据"""
+        logger.info(f"save stock basic")
+        if df is None or df.empty:
+            logger.warning(f"保存的数据为空")
+            return 0
+
+        saved_count = 0
+        # 使用数据库会话（工作单元模式）
+        with self.get_session() as session:
+            try:
+                # 遍历DataFrame的每一行（批处理中的逐行处理）
+                # df.iterrows(): 返回(index, row)元组，_表示忽略索引
+                for _, row in df.iterrows():
+                    # === 步骤1：解析日期（支持多种格式）===
+                    # 数据可能来自不同来源，日期格式不统一，需要标准化
+                    code = row.get('symbol')
+                    list_date = parse_row_date(row.get('list_date'))
+                    # === 步骤2：检查记录是否已存在（UPSERT核心）===
+                    # 查询条件：相同的股票代码 + 相同的交易日期
+                    # 利用(code, date)复合索引快速查找
+                    existing = session.execute(
+                        select(StockBasic).where(
+                            and_(
+                                StockBasic.code == code,  # 股票代码匹配
+                            )
+                        )
+                    ).scalar_one_or_none()  # 返回单个结果或None
+
+                    # === 步骤3：根据存在性执行更新或插入 ===
+                    if existing:
+                        # 情况A：记录已存在 → 执行UPDATE（更新）
+                        # 更新所有字段，确保数据最新
+                        existing.name = row.get('name')
+                        existing.industry = row.get('industry')
+                        existing.list_date = list_date
+                        existing.list_status = row.get('list_status')
+                        existing.market = row.get('market')
+                        existing.updated_at = datetime.now()  # 更新修改时间
+                        # 注意：更新操作不增加saved_count（只统计新增）
+                    else:
+                        # 情况B：记录不存在 → 执行INSERT（插入）
+                        # 创建新的StockBasic对象，填充所有字段
+                        record = StockBasic(
+                            # 标识字段
+                            code=code,  # 股票代码
+                            name=row.get('name'),
+                            industry=row.get('industry'),
+                            list_date=list_date,
+                            list_status=row.get('list_status'),
+                            market=row.get('market'),
+
+                            # created_at和updated_at由SQLAlchemy自动设置
+                        )
+                        session.add(record)  # 添加到会话（延迟插入）
+                        saved_count += 1  # 新增记录计数+1
+
+                # === 步骤4：提交事务 ===
+                # 所有行处理完成后，一次性提交到数据库
+                # 优点：1) 原子性 2) 性能优化（减少IO）3) 数据一致性
+                session.commit()
+
+                # 记录成功日志（区分新增和更新）
+                if saved_count > 0:
+                    logger.info(f"保存 {code} 数据成功，新增 {saved_count} 条记录")
+                else:
+                    logger.info(f"保存 {code} 数据成功，所有数据已存在（只更新不新增）")
+
+            except Exception as e:
+                # === 步骤5：错误处理（事务回滚）===
+                # 任何异常都触发事务回滚，保证数据一致性
+                # 回滚会撤销本次事务中的所有操作
+                session.rollback()
+
+                # 记录错误日志（包含详细上下文）
+                logger.error(f"保存 {code} 数据失败: {e}")
+
+                # 重新抛出异常，让调用者处理
+                # 这是重要的设计：不吞没异常，让上层决定如何处理
+                raise
+
+        # === 步骤6：返回结果 ===
+        # 只返回新增记录数（更新的记录不计入）
+        return saved_count
+
+    def save_stock_daily_basic(self, df: pd.DataFrame, code: str) -> int:
+        """获取每日指标数据"""
+        if df is None or df.empty:
+            logger.warning(f"保存的数据为空，跳过{code}")
+            return 0
+        saved_count = 0
+        # 使用数据库会话（工作单元模式）
+        with self.get_session() as session:
+            try:
+                # 遍历DataFrame的每一行（批处理中的逐行处理）
+                # df.iterrows(): 返回(index, row)元组，_表示忽略索引
+                for _, row in df.iterrows():
+                    # === 步骤1：解析日期（支持多种格式）===
+                    # 数据可能来自不同来源，日期格式不统一，需要标准化
+                    trade_date = parse_row_date(row.get('trade_date'))
+                    # === 步骤2：检查记录是否已存在（UPSERT核心）===
+                    # 查询条件：相同的股票代码 + 相同的交易日期
+                    # 利用(code, date)复合索引快速查找
+                    existing = session.execute(
+                        select(StockDailyBasic).where(
+                            and_(
+                                StockDailyBasic.code == code,  # 股票代码匹配
+                                StockDailyBasic.trade_date == trade_date
+                            )
+                        )
+                    ).scalar_one_or_none()  # 返回单个结果或None
+
+                    # === 步骤3：根据存在性执行更新或插入 ===
+                    if existing:
+                        # 情况A：记录已存在 → 执行UPDATE（更新）
+                        # 更新所有字段，确保数据最新
+                        existing.close = row.get('close')
+                        existing.turnover_rate = row.get('turnover_rate')
+                        existing.turnover_rate_f = row.get('turnover_rate_f')
+                        existing.volume_ratio = row.get('volume_ratio')
+                        existing.pe = row.get('pe')
+                        existing.pe_ttm = row.get('pe_ttm')
+                        existing.pb = row.get('pb')
+                        existing.ps = row.get('ps')
+                        existing.ps_ttm = row.get('ps_ttm')
+                        existing.dv_ratio = row.get('dv_ratio')
+                        existing.dv_ttm = row.get('dv_ttm')
+                        existing.total_share = row.get('total_share')
+                        existing.float_share = row.get('float_share')
+                        existing.total_mv = row.get('total_mv')
+                        existing.circ_mv = row.get('circ_mv')
+                        existing.updated_at = datetime.now()  # 更新修改时间
+                        # 注意：更新操作不增加saved_count（只统计新增）
+                    else:
+                        # 情况B：记录不存在 → 执行INSERT（插入）
+                        # 创建新的StockBasic对象，填充所有字段
+                        record = StockDailyBasic(
+                            # 标识字段
+                            code=code,
+                            trade_date=trade_date,
+                            close=row.get('close'),
+                            turnover_rate=row.get('turnover_rate'),
+                            turnover_rate_f=row.get('turnover_rate_f'),
+                            volume_ratio=row.get('volume_ratio'),
+                            pe=row.get('pe'),
+                            pe_ttm=row.get('pe_ttm'),
+                            pb=row.get('pb'),
+                            ps=row.get('ps'),
+                            ps_ttm=row.get('ps_ttm'),
+                            dv_ratio=row.get('dv_ratio'),
+                            dv_ttm=row.get('dv_ttm'),
+                            total_share=row.get('total_share'),
+                            float_share=row.get('float_share'),
+                            total_mv=row.get('total_mv'),
+                            circ_mv=row.get('circ_mv'),
+                            # created_at和updated_at由SQLAlchemy自动设置
+                        )
+                        session.add(record)  # 添加到会话（延迟插入）
+                        saved_count += 1  # 新增记录计数+1
+
+                # === 步骤4：提交事务 ===
+                # 所有行处理完成后，一次性提交到数据库
+                # 优点：1) 原子性 2) 性能优化（减少IO）3) 数据一致性
+                session.commit()
+
+                # 记录成功日志（区分新增和更新）
+                if saved_count > 0:
+                    logger.info(f"保存 {code} 数据成功，新增 {saved_count} 条记录")
+                else:
+                    logger.info(f"保存 {code} 数据成功，所有数据已存在（只更新不新增）")
+
+            except Exception as e:
+                # === 步骤5：错误处理（事务回滚）===
+                # 任何异常都触发事务回滚，保证数据一致性
+                # 回滚会撤销本次事务中的所有操作
+                session.rollback()
+
+                # 记录错误日志（包含详细上下文）
+                logger.error(f"保存 {code} 数据失败: {e}")
+
+                # 重新抛出异常，让调用者处理
+                # 这是重要的设计：不吞没异常，让上层决定如何处理
+                raise
+        # === 步骤6：返回结果 ===
+        # 只返回新增记录数（更新的记录不计入）
+        return saved_count
 
     def save_daily_data(
             self,
@@ -1802,13 +2062,31 @@ class DatabaseManager:
         else:
             return "震荡整理 ↔️"  # 趋势不明，观望为主
 
+
 def parse_row_date(row_date):
     if isinstance(row_date, str):
-        row_date = datetime.datetime.strptime(row_date, '%Y-%m-%d').date()
-    elif isinstance(row_date, datetime.datetime):
+        date_str = row_date.strip()
+        # 定义支持的格式列表（按常见程度排序）
+        date_formats = [
+            '%Y-%m-%d',  # 1991-04-03
+            '%Y%m%d',  # 19910403
+            '%Y/%m/%d',  # 1991/04/03
+            '%Y.%m.%d',  # 1991.04.03
+            '%d/%m/%Y',  # 03/04/1991
+            '%m/%d/%Y',  # 04/03/1991
+            '%Y年%m月%d日',  # 1991年04月03日
+        ]
+        # 尝试每种格式
+        for date_format in date_formats:
+            try:
+                return datetime.strptime(date_str, date_format).date()
+            except ValueError:
+                continue
+    elif isinstance(row_date, datetime):
         row_date = row_date.date()
     elif isinstance(row_date, pd.Timestamp):
         row_date = row_date.date()
+
     return row_date
 
 
