@@ -85,7 +85,7 @@ A股自选股智能分析系统 - 主调度程序
 """
 import os
 
-
+from fontTools.misc.plistlib import end_date
 
 # 代理配置 - 仅在本地环境使用，GitHub Actions 不需要
 if os.getenv("GITHUB_ACTIONS") != "true":
@@ -98,6 +98,7 @@ import argparse
 import logging
 import sys
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date, timezone, timedelta
 from logging.handlers import RotatingFileHandler
@@ -108,6 +109,7 @@ from feishu_doc import FeishuDocManager
 from config import get_config, Config
 from storage import get_db
 from data_provider import DataFetcherManager
+from data_provider.base import  merge_and_clean_data
 from data_provider.tushare_fetcher import TushareFetcher, set_tushare_token
 from data_provider.akshare_fetcher import AkshareFetcher, RealtimeQuote, ChipDistribution
 from analyzer import GeminiAnalyzer, AnalysisResult, STOCK_NAME_MAP
@@ -115,6 +117,7 @@ from notification import NotificationService, NotificationChannel
 from search_service import SearchService
 from stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 from market_analyzer import MarketAnalyzer
+from data_provider.calculate import CalculateFetcher
 import pandas as pd
 
 
@@ -470,6 +473,7 @@ class StockAnalysisPipeline:
         self.akshare_fetcher = AkshareFetcher()  # 用于获取增强数据（量比、筹码等）
 
         self.tushare_fetcher = TushareFetcher()
+        self.calculate_fetcher = CalculateFetcher()
 
         # 步骤6：初始化趋势分析器（技术分析，MA多头判断）
         self.trend_analyzer = StockTrendAnalyzer()  # 趋势分析器
@@ -619,21 +623,143 @@ class StockAnalysisPipeline:
 
             start_date = self.get_stock_start_date(code)
             logger.info(f"[{start_date}]开始日期")
-            df, source_name = self.fetcher_manager.get_daily_data(code, start_date = start_date, days=30)
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            df_db = self.db.get_all_daily_data(code)
+            df, source_name = self.fetcher_manager.get_daily_data(code, df_db= df_db, start_date = start_date_str, days=30)
             
             if df is None or df.empty:
                 return False, "获取数据为空"
-            
             # 保存到数据库
-            saved_count = self.db.save_daily_data(df, code, source_name)
+            saved_count = self.db.save_daily_data(df, code, start_date, source_name)
             logger.info(f"[{code}] 数据保存成功（来源: {source_name}，新增 {saved_count} 条）")
             
             return True, None
             
         except Exception as e:
             error_msg = f"获取/保存数据失败: {str(e)}"
-            logger.error(f"[{code}] {error_msg}")
+            logger.error(f"[{code}] {error_msg}， {traceback.format_exc()}")
             return False, error_msg
+
+    def fetch_and_save_stock_data_by_tushare(
+        self,
+        code: str,
+        force_refresh: bool = False,
+    )-> Tuple[bool, Optional[str]]:
+        if not code.startswith(('600', '601', '603', '688', '000', '002', '300')):
+            logger.warning(f"[{code} 非A股不能获取周线和月线]")
+            return True, None
+
+        success, error = self.fetch_and_save_stock_week_data(code, force_refresh)
+        if not success:
+            logger.warning(f"[{code}] 周数据获取失败: {error}")
+        success, error = self.fetch_and_save_stock_month_data(code, force_refresh)
+        if not success:
+            logger.warning(f"[{code}] 月数据获取失败: {error}")
+        success, error = self.fetch_and_save_stock_basic_daily(code)
+        if not success:
+            logger.warning(f"[{code}] 每日指标数据获取失败: {error}")
+
+        return True, None
+
+    def  fetch_and_save_stock_week_data(
+        self,
+        code: str,
+        force_refresh: bool = False
+    ) -> Tuple[bool, Optional[str]]:
+        """获取和保存周线数据"""
+        try:
+            today = date.today()
+            if not force_refresh and self.db.is_date_exist(code, "week", today):
+                logger.info(f"[{code}] 今日周数据已存在，跳过获取（断点续传）")
+                return True, None
+            # 从数据源获取数据
+            logger.info(f"[{code}] 开始从数据源获取周数据...")
+            start_date = self.get_stock_week_start_date(code)
+            end_date = today.strftime('%Y-%m-%d')
+            logger.info(f"[{start_date}]开始日期")
+
+            df_db = self.db.get_all_weekly_data(code)
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            df = self.tushare_fetcher.fetch_raw_weekly_month_data(
+                code, start_date=start_date_str,end_date=end_date, freq = "week")
+
+            if df is None or df.empty:
+                return False, "获取周数据为空"
+
+            df = merge_and_clean_data("date", df_db, df)
+
+            df = self.calculate_fetcher.calculate_indicators(df)
+            # 保存到数据库
+            source_name = "tushare"
+            saved_count = self.db.save_week_data(df, code, start_date, source_name)
+            logger.info(f"[{code}] 周数据保存成功（来源: {source_name}，新增 {saved_count} 条）")
+
+            return True, None
+        except Exception as e:
+            error_msg = f"获取/保存周数据失败: {str(e)}"
+            logger.error(f"[{code}] {error_msg} {traceback.format_exc()}")
+            return False, error_msg
+
+    def  fetch_and_save_stock_month_data(
+        self,
+        code: str,
+        force_refresh: bool = False
+    ) -> Tuple[bool, Optional[str]]:
+        """获取和保存月线数据"""
+        try:
+            today = date.today()
+            if not force_refresh and self.db.is_date_exist(code, "month", today):
+                logger.info(f"[{code}] 今日月数据已存在，跳过获取（断点续传）")
+                return True, None
+            # 从数据源获取数据
+            logger.info(f"[{code}] 开始从数据源获取月数据...")
+            start_date = self.get_stock_month_start_date(code)
+            end_date = today.strftime('%Y-%m-%d')
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            logger.info(f"[{start_date}]开始日期")
+            df = self.tushare_fetcher.fetch_raw_weekly_month_data(
+                code, start_date=start_date_str,end_date= end_date, freq = "month")
+
+            if df is None or df.empty:
+                return False, "获取月数据为空"
+            df = self.calculate_fetcher.calculate_indicators(df)
+            source_name = "tushare"
+            # 保存到数据库
+            saved_count = self.db.save_month_data(df, code, start_date, source_name)
+            logger.info(f"[{code}] 月数据保存成功（来源: {source_name}，新增 {saved_count} 条）")
+
+            return True, None
+        except Exception as e:
+            error_msg = f"获取/保存月数据失败: {str(e)}"
+            logger.error(f"[{code}] {error_msg} {traceback.format_exc()}")
+            return False, error_msg
+
+    def fetch_and_save_stock_basic_daily(
+        self,
+        code: str
+    ) -> Tuple[bool, Optional[str]]:
+        """获取每日指标数据"""
+        try:
+            today = date.today()
+            logger.info(f"[{code} 获取每日指标数据]")
+            start_date = self.get_stock_basic_daily_start_date(code)
+            logger.info(f"[{start_date} start date]")
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            end_date = today.strftime('%Y-%m-%d')
+            df = self.tushare_fetcher.stock_daily_basic(stock_code=code, start_date=start_date_str, end_date=end_date)
+            if df is None or df.empty:
+                logger.error("tushare get daily basic err")
+                return False, "获取每日指标数据为空"
+            saved_count = self.db.save_stock_daily_basic(df, code)
+            logger.info(f"[{code}] 每日指标数据保存成功（，新增 {saved_count} 条）")
+
+            return True, None
+
+        except Exception as e:
+            error_msg = f"获取/保存每日指标数据失败: {str(e)}"
+            logger.error(f"[{code}] {error_msg} {traceback.format_exc()}")
+            return False, error_msg
+
 
     def save_stock_basic_by_tushare(self):
         """保存基本的股票信息"""
@@ -643,34 +769,84 @@ class StockAnalysisPipeline:
             if df is None or df.empty:
                 logger.error(f"获取股票基础信息为空 get stock basic")
                 return
+            logger.warning(f"获取的数据[{df.head(1)}]")
             save_count = self.db.save_stock_basic(df)
             logger.warning(f"保存的数据为[{save_count}]")
 
         except Exception as e:
-            logger.error(f"获取数据错误[{e}]")
+            logger.error(f"获取数据错误[{e}] {traceback.format_exc()}")
 
-    def get_stock_start_date(self, code: str)->str:
+    def get_stock_start_date(self, code: str)->date|None:
         """获取股票的开始时间"""
         if code is None:
             logger.error(f"code is null")
-            return ""
+            return None
         daily_datas = self.db.get_latest_daily_data(code, 2)
-        if daily_datas is None or len(daily_datas) == 0:
+
+        if  len(daily_datas) == 0 or daily_datas[0].date is None:
             start_date = self.get_stock_start_date_by_stock_basic(code)
-            if start_date == "" :
+            if start_date is None :
+                logger.error(f"股票的基本信息为空通过接口获取数据[{code}]")
+                # 全量加载一次
+                self.save_stock_basic_by_tushare()
+                start_date = self.get_stock_start_date_by_stock_basic(code)
+            return start_date
+        return daily_datas[0].date
+
+    def get_stock_week_start_date(self, code: str)->date|None:
+        """获取周线的开始时间"""
+        if code is None:
+            logger.error(f"code is null")
+            return None
+        daily_datas = self.db.get_latest_weekly_data(code, 2)
+        if len(daily_datas) == 0 or daily_datas[0].date is None:
+            start_date = self.get_stock_start_date_by_stock_basic(code)
+            if start_date is None:
                 logger.error("股票的基本信息为空[]")
                 # 全量加载一次
                 self.save_stock_basic_by_tushare()
                 start_date = self.get_stock_start_date_by_stock_basic(code)
             return start_date
-        return daily_datas[0].date.strftime('%Y-%m-%d')
+        return daily_datas[0].date
 
-    def get_stock_start_date_by_stock_basic(self, code: str)->str:
+    def get_stock_month_start_date(self, code: str)->date|None:
+        """获取月线的开始时间"""
+        if code is None:
+            logger.error(f"code is null")
+            return None
+        daily_datas = self.db.get_latest_month_data(code, 2)
+        if  len(daily_datas) == 0 or daily_datas[0].date is None:
+            start_date = self.get_stock_start_date_by_stock_basic(code)
+            if start_date is None:
+                logger.error("股票的基本信息为空[]")
+                # 全量加载一次
+                self.save_stock_basic_by_tushare()
+                start_date = self.get_stock_start_date_by_stock_basic(code)
+            return start_date
+        return daily_datas[0].date
+
+    def get_stock_basic_daily_start_date(self, code: str)->date|None:
+        """获取每日指标数据的开始日期"""
+        if code is None:
+            logger.error(f"code is null")
+            return None
+        daily_basic_datas = self.db.get_latest_daily_basic_data(code, 2)
+        if  len(daily_basic_datas) == 0 or daily_basic_datas[0].trade_date is None:
+            start_date = self.get_stock_start_date_by_stock_basic(code)
+            if start_date is None :
+                logger.error("股票的基本信息为空[]")
+                # 全量加载一次
+                self.save_stock_basic_by_tushare()
+                start_date = self.get_stock_start_date_by_stock_basic(code)
+            return start_date
+        return daily_basic_datas[0].trade_date
+
+    def get_stock_start_date_by_stock_basic(self, code: str)->date | None:
         stock_basic = self.db.get_stock_basic(code)
-        if stock_basic is None or stock_basic.empty:
+        if  stock_basic is None:
             logger.error("股票的基本信息为空 db")
-            return ""
-        return stock_basic.list_date.strftime('%Y-%m-%d')
+            return None
+        return stock_basic.list_date
     
     def analyze_stock(self, code: str) -> Optional[AnalysisResult]:
         """
@@ -802,12 +978,16 @@ class StockAnalysisPipeline:
         logger.debug(f"开始分析单个股票: {code}")
         try:
             # 获取股票名称（优先从实时行情获取真实名称）
+            stock_basic = self.db.get_stock_basic(code)
+
             stock_name = STOCK_NAME_MAP.get(code, '')
+            if  stock_basic is not None:
+                stock_name = stock_basic.name
             
             # Step 1: 获取实时行情（量比、换手率等）
             realtime_quote: Optional[RealtimeQuote] = None
             try:
-                realtime_quote = self.akshare_fetcher.get_realtime_quote(code)
+                realtime_quote = self.get_realtime_quote(code)
                 if realtime_quote:
                     # 使用实时行情返回的真实股票名称
                     if realtime_quote.name:
@@ -895,7 +1075,43 @@ class StockAnalysisPipeline:
             logger.error(f"[{code}] 分析失败: {e}")
             logger.exception(f"[{code}] 详细错误信息:")
             return None
-    
+
+    def get_realtime_quote(self, code: str)->Optional[RealtimeQuote]:
+        """获取实时数据"""
+        realtime_quote: Optional[RealtimeQuote] = None
+        try:
+            realtime_quote = self.akshare_fetcher.get_realtime_quote(code)
+            if realtime_quote:
+                # 使用实时行情返回的真实股票名称
+                if realtime_quote.name:
+                    stock_name = realtime_quote.name
+                logger.info(f"[{code}] {stock_name} 实时行情: 价格={realtime_quote.price}, "
+                            f"量比={realtime_quote.volume_ratio}, 换手率={realtime_quote.turnover_rate}%")
+                return realtime_quote
+        except Exception as e:
+            logger.warning(f"[{code}] 获取实时行情失败: {e}, 通过 tushare 获取")
+            return self.get_realtime_quote_by_tushare(code)
+
+
+
+    def get_realtime_quote_by_tushare(self, code: str) ->Optional[RealtimeQuote]:
+        daily_basic_list = self.db.get_latest_daily_basic_data(code, 1)
+        if len(daily_basic_list) > 0:
+            daily_basic = daily_basic_list[0]
+            realtime_quote = RealtimeQuote(
+                code= code,
+                price= daily_basic.close,
+                volume_ratio=daily_basic.volume_ratio,
+                turnover_rate=daily_basic.turnover_rate,
+                pe_ratio=daily_basic.pe,
+                pb_ratio=daily_basic.pb,
+                total_mv= daily_basic.total_mv,
+                circ_mv=daily_basic.circ_mv,
+            )
+            return realtime_quote
+        return None
+
+
     def _enhance_context(
         self,
         context: Dict[str, Any],
@@ -1410,7 +1626,10 @@ class StockAnalysisPipeline:
             if not success:
                 logger.warning(f"[{code}] 数据获取失败: {error}")
                 # 即使获取失败，也尝试用已有数据分析
-            
+            success, error = self.fetch_and_save_stock_data_by_tushare(code)
+            if not success:
+                logger.warning(f"[{code}] 周或者月数据获取失败: {error}")
+
             # Step 2: AI 分析
             if skip_analysis:
                 logger.info(f"[{code}] 跳过 AI 分析（dry-run 模式）")

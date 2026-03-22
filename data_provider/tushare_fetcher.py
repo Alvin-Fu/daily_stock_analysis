@@ -16,6 +16,7 @@ TushareFetcher - 备用数据源 1 (Priority 2)
 
 import logging
 import time
+import traceback
 from datetime import datetime
 from typing import Optional, Tuple
 import tushare as ts
@@ -218,7 +219,7 @@ class TushareFetcher(BaseFetcher):
             if any(keyword in error_msg for keyword in ['quota', '配额', 'limit', '权限']):
                 logger.warning(f"Tushare 配额可能超限: {e}")
                 raise RateLimitError(f"Tushare 配额超限: {e}") from e
-            logger.error(f"tushare 获取数据失败[{e}]")
+            logger.error(f"tushare 获取数据失败[{e}] {traceback.format_exc()}")
             raise DataFetchError(f"Tushare 获取数据失败: {e}") from e
     
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
@@ -297,14 +298,20 @@ class TushareFetcher(BaseFetcher):
         logger.info(f"调用 Tushare daily[{ts_code}, {ts_start}, {ts_end}]")
         return ts_code, ts_start, ts_end
 
-    def fetch_raw_weekly_month_data(self, stock_code: str, start_date: str, end_date: str, freq: str) -> pd.DataFrame:
+    def fetch_raw_weekly_month_data(
+            self,
+            stock_code: str,
+            start_date: str,
+            end_date: str,
+            freq: str
+    ) -> pd.DataFrame:
         """
         获取周和月线数据（复权--每日更新）
         """
         if self._api is None:
             raise DataFetchError("Tushare API 未初始化，请检查 Token 配置")
 
-        ts_code, ts_start, ts_end = self.fetch_common(self, stock_code, start_date, end_date)
+        ts_code, ts_start, ts_end = self.fetch_common(stock_code, start_date, end_date)
 
         logger.debug(f"调用 Tushare stk_week_month_adj({ts_code}, {ts_start}, {ts_end})")
         try:
@@ -315,6 +322,7 @@ class TushareFetcher(BaseFetcher):
                 end_date=ts_end,
                 freq=freq,
             )
+            df = self.clean_month_weekly_data(df)
             return df
 
         except Exception as e:
@@ -327,14 +335,51 @@ class TushareFetcher(BaseFetcher):
 
             raise DataFetchError(f"Tushare 获取数据失败: {e}") from e
 
-    def stock_daily_basic(self, stock_code: str, trade_date: str, start_date: str, end_date: str) -> pd.DataFrame:
+    def clean_month_weekly_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """清洗周数据，确保date字段非空"""
+        # 1. 映射Tushare字段到表字段
+        df = df.copy()
+        # 列名映射
+        column_mapping = {
+            'trade_date': 'date',
+            'vol': 'volume',
+            'ts_code': 'code',
+        }
+
+        df = df.rename(columns=column_mapping)
+        # 2. 清理date字段
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'], format='%Y%m%d')
+
+        # 成交量单位转换（Tushare 的 vol 单位是手，需要转换为股）
+        if 'vol' in df.columns:
+            df['volume'] = df['vol'] * 100
+
+        # 成交额单位转换（Tushare 的 amount 单位是千元，转换为元）
+        if 'amount' in df.columns:
+            df['amount'] = df['amount'] * 1000
+
+        return df
+
+
+    def stock_daily_basic(
+            self,
+            start_date: str,
+            end_date: str,
+            stock_code =None,
+            trade_date = None,
+    ) -> pd.DataFrame:
         """每日指标
             stock_code 和 trade_date二选一
         """
         if self._api is None:
             raise DataFetchError("Tushare API 未初始化，请检查 Token 配置")
 
-        t_date = trade_date.replace('-', '')
+        if stock_code is None and trade_date is None:
+            raise DataFetchError("请求参数错误请检查 stock code 和 trade date")
+        t_date = None
+        if trade_date is not None:
+            t_date = trade_date.replace('-', '')
 
         ts_code, ts_start, ts_end = self.fetch_common(stock_code, start_date, end_date)
         try:
@@ -356,9 +401,6 @@ class TushareFetcher(BaseFetcher):
                 raise RateLimitError(f"Tushare 配额超限: {e}") from e
 
             raise DataFetchError(f"Tushare stk daily basic err: {e}") from e
-
-
-
 
     def stk_holdertrade(self, stock_code: str, ann_date, start_date: str, end_date: str)  -> pd.DataFrame:
         """

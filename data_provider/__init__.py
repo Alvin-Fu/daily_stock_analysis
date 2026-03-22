@@ -23,6 +23,7 @@ from .akshare_fetcher import AkshareFetcher
 from .tushare_fetcher import TushareFetcher
 from .baostock_fetcher import BaostockFetcher
 from .yfinance_fetcher import YfinanceFetcher
+from .calculate import CalculateFetcher
 
 __all__ = [
     'BaseFetcher',

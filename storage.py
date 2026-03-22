@@ -318,7 +318,7 @@ class StockWeekly(Base):
         """
         return {
             'code': self.code,
-            'date': self.trade_date,
+            'date': self.date,
             'end_date': self.end_date,
             'open': self.open,
             'high': self.high,
@@ -470,7 +470,7 @@ class StockMonth(Base):
         """
         return {
             'code': self.code,
-            'date': self.trade_date,
+            'date': self.date,
             'end_date': self.end_date,
             'open': self.open,
             'high': self.high,
@@ -564,22 +564,22 @@ class StockDailyBasic(Base):
     # 建立索引优化按代码查询的性能
     code = Column(String(10), nullable=False, index=True)
     trade_date = Column(Date, nullable=False, index=True)
-    close = Column(Float, nullable=False)
-    turnover_rate = Column(Float, nullable=False) # 换手率
-    turnover_rate_f = Column(Float, nullable=False)  # 换手率（自由流通股）
-    volume_ratio =  Column(Float, nullable=False)   # 量比
-    pe = Column(Float, nullable=False)   # 市盈率
-    pe_ttm = Column(Float, nullable=False)  # 静态市盈率
-    pb = Column(Float, nullable=False)  # 市净率
-    ps = Column(Float, nullable=False)  # 市销率
-    ps_ttm = Column(Float, nullable=False)  #
-    dv_ratio = Column(Float, nullable=False)  # 股息率
-    dv_ttm = Column(Float, nullable=False)  # ttm
-    total_share = Column(Float, nullable=False)  # 总股本（万股）
-    float_share = Column(Float, nullable=False)  # 流通股本
-    free_share = Column(Float, nullable=False)  # 自由流通股本
-    total_mv = Column(Float, nullable=False)  # 总市值（万元）
-    circ_mv = Column(Float, nullable=False)  # 流通市值
+    close = Column(Float, nullable=True)
+    turnover_rate = Column(Float, nullable=True) # 换手率
+    turnover_rate_f = Column(Float, nullable=True)  # 换手率（自由流通股）
+    volume_ratio =  Column(Float, nullable=True)   # 量比
+    pe = Column(Float, nullable=True)   # 市盈率
+    pe_ttm = Column(Float, nullable=True)  # 静态市盈率
+    pb = Column(Float, nullable=True)  # 市净率
+    ps = Column(Float, nullable=True)  # 市销率
+    ps_ttm = Column(Float, nullable=True)  #
+    dv_ratio = Column(Float, nullable=True)  # 股息率
+    dv_ttm = Column(Float, nullable=True)  # ttm
+    total_share = Column(Float, nullable=True)  # 总股本（万股）
+    float_share = Column(Float, nullable=True)  # 流通股本
+    free_share = Column(Float, nullable=True)  # 自由流通股本
+    total_mv = Column(Float, nullable=True)  # 总市值（万元）
+    circ_mv = Column(Float, nullable=True)  # 流通市值
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)  # 最后更新时间
     # ===== 数据库约束和索引 =====
     # 唯一约束：确保同一股票同一日期只有一条记录，防止数据重复
@@ -954,8 +954,36 @@ class DatabaseManager:
             # 将SQLAlchemy的Scalar序列转换为Python列表
             return list(results)
 
+    def get_all_daily_data(self, code: str) -> pd.DataFrame:
+        """获取全部的数据"""
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockDaily)
+                .where(StockDaily.code == code)
+                .order_by(desc(StockDaily.date))
+            ).scalars().all()
+
+            if not results:
+                return pd.DataFrame()
+
+            # 核心：利用to_dict()转为字典列表（关键简化步骤）
+            data_list = pd.DataFrame([obj.to_dict() for obj in results])
+
+            # 4. 核心：将datetime.date转为pd.Timestamp（和Tushare统一类型）
+            if "date" in data_list.columns:
+                # datetime.date → pd.Timestamp（关键兼容步骤）
+                data_list["date"] = data_list["date"].apply(lambda x: pd.Timestamp(x))
+
+                # 确保code字段格式统一（字符串类型）
+                data_list["code"] = data_list["code"].astype(str)
+
+            return data_list
+
     def get_daily_data_range(self, code: str, start_date: date, end_date: date) -> List[StockDaily]:
         """获取一段时间的日线数据(按日期降序排列)"""
+        if start_date > end_date:
+            logger.error(f"start_date {start_date} > end_date {end_date}")
+            raise ValueError(f"{start_date}, {end_date} err")
         with self.get_session() as session:
             results = session.execute(
                 select(StockDaily)
@@ -979,10 +1007,39 @@ class DatabaseManager:
                 .order_by(desc(StockWeekly.date))
                 .limit(days)
             ).scalars().all()
+            logger.warning(f"result count: [{len(results)}]")
             return list(results)
+
+    def get_all_weekly_data(self, code: str) -> pd.DataFrame:
+        """获取全部的周数据"""
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockWeekly)
+                .where(StockWeekly.code == code)
+                .order_by(desc(StockWeekly.date))
+            ).scalars().all()
+
+            if not results:
+                return pd.DataFrame()
+
+            # 核心：利用to_dict()转为字典列表（关键简化步骤）
+            data_list = pd.DataFrame([obj.to_dict() for obj in results])
+
+            # 4. 核心：将datetime.date转为pd.Timestamp（和Tushare统一类型）
+            if "date" in data_list.columns:
+                # datetime.date → pd.Timestamp（关键兼容步骤）
+                data_list["date"] = data_list["date"].apply(lambda x: pd.Timestamp(x))
+                data_list["end_date"] = data_list["end_date"].apply(lambda x: pd.Timestamp(x))
+                # 确保code字段格式统一（字符串类型）
+                data_list["code"] = data_list["code"].astype(str)
+
+            return data_list
 
     def get_weekly_data_range(self, code: str, start_date: date, end_date: date) -> List[StockWeekly]:
         """获取一段时间的周线数据(按日期降序排列)"""
+        if start_date > end_date:
+            logger.error(f"start_date {start_date} > end_date {end_date}")
+            raise ValueError(f"{start_date}, {end_date} err")
         with self.get_session() as session:
             results = session.execute(
                 select(StockWeekly)
@@ -1008,8 +1065,36 @@ class DatabaseManager:
             ).scalars().all()
             return list(results)
 
+    def get_all_month_data(self, code: str) -> pd.DataFrame:
+        """获取全部的月数据"""
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockMonth)
+                .where(StockMonth.code == code)
+                .order_by(desc(StockMonth.date))
+            ).scalars().all()
+
+            if not results:
+                return pd.DataFrame()
+
+            # 核心：利用to_dict()转为字典列表（关键简化步骤）
+            data_list = pd.DataFrame([obj.to_dict() for obj in results])
+
+            # 4. 核心：将datetime.date转为pd.Timestamp（和Tushare统一类型）
+            if "date" in data_list.columns:
+                # datetime.date → pd.Timestamp（关键兼容步骤）
+                data_list["date"] = data_list["date"].apply(lambda x: pd.Timestamp(x))
+                data_list["end_date"] = data_list["end_date"].apply(lambda x: pd.Timestamp(x))
+                # 确保code字段格式统一（字符串类型）
+                data_list["code"] = data_list["code"].astype(str)
+
+            return data_list
+
     def get_month_data_range(self, code: str, start_date: date, end_date: date) -> List[StockMonth]:
         """获取N天的月线数据（按照日期降序排列）"""
+        if start_date > end_date:
+            logger.error(f"start_date {start_date} > end_date {end_date}")
+            raise ValueError(f"{start_date}, {end_date} err")
         with self.get_session() as session:
             results = session.execute(
                 select(StockMonth)
@@ -1039,7 +1124,7 @@ class DatabaseManager:
         """获取每日预测数据"""
         if start_date > end_date:
             logger.error(f"start_date {start_date} > end_date {end_date}")
-            raise ValueError("Tushare API 未初始化，请检查 Token 配置")
+            raise ValueError(f"{start_date}, {end_date} err")
 
         with self.get_session() as session:
             results = session.execute(
@@ -1051,10 +1136,10 @@ class DatabaseManager:
                     )
                 )
                 .order_by(desc(DailyForecast.forecast_date))
-            ).scalars_one_or_none()
+            ).scalars().all()
             return list(results)
 
-    def get_stock_basic(self, code: str) -> StockBasic:
+    def get_stock_basic(self, code: str) -> Optional[StockBasic]:
         """获取股票的基本信息"""
         if code is None:
             logger.error(f"code is null")
@@ -1067,6 +1152,36 @@ class DatabaseManager:
                 )
             ).scalar_one_or_none()
             return result
+
+    def get_latest_daily_basic_data(self, code: str, days: int = 2) -> List[StockDailyBasic]:
+        """获取每日指标数据"""
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockDailyBasic)
+                .where(StockDailyBasic.code == code)
+                .order_by(desc(StockDailyBasic.trade_date))
+                .limit(days)
+            ).scalars().all()
+            return list(results)
+
+    def get_daily_basic_data(self, code: str, start_date: str, end_date: str) -> List[StockDailyBasic]:
+        """获取一段时间的每日指标数据"""
+        if start_date > end_date:
+            logger.error(f"start_date {start_date} > end_date {end_date}")
+            raise ValueError(f"{start_date}, {end_date} err")
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockDailyBasic)
+                .where(
+                    and_(
+                        StockDailyBasic.code == code,
+                        StockDailyBasic.trade_date >= start_date,
+                        StockDailyBasic.trade_date <= end_date
+                    )
+                )
+                .order_by(desc(StockDailyBasic.trade_date))
+            ).scalars().all()
+            return list(results)
 
 
     def save_stock_basic(self, df: pd.DataFrame) -> int:
@@ -1198,6 +1313,7 @@ class DatabaseManager:
                         existing.dv_ttm = row.get('dv_ttm')
                         existing.total_share = row.get('total_share')
                         existing.float_share = row.get('float_share')
+                        existing.free_share = row.get('free_share')
                         existing.total_mv = row.get('total_mv')
                         existing.circ_mv = row.get('circ_mv')
                         existing.updated_at = datetime.now()  # 更新修改时间
@@ -1222,6 +1338,7 @@ class DatabaseManager:
                             dv_ttm=row.get('dv_ttm'),
                             total_share=row.get('total_share'),
                             float_share=row.get('float_share'),
+                            free_share=row.get('free_share'),
                             total_mv=row.get('total_mv'),
                             circ_mv=row.get('circ_mv'),
                             # created_at和updated_at由SQLAlchemy自动设置
@@ -1260,6 +1377,7 @@ class DatabaseManager:
             self,
             df: pd.DataFrame,
             code: str,
+            start_date: Optional[Date] = None,
             data_source: str = "Unknown"
     ) -> int:
         """
@@ -1365,6 +1483,10 @@ class DatabaseManager:
                     # 情况3：Pandas Timestamp对象（转换为datetime再提取日期）
                     elif isinstance(row_date, pd.Timestamp):
                         row_date = row_date.date()
+
+                    if  row_date < start_date:
+                        logger.info(f"row date: [{row_date}] start date: [{start_date}]")
+                        continue
 
                     # === 步骤2：检查记录是否已存在（UPSERT核心）===
                     # 查询条件：相同的股票代码 + 相同的交易日期
@@ -1480,6 +1602,7 @@ class DatabaseManager:
             self,
             df: pd.DataFrame,
             code: str,
+            start_date: Optional[date] = None,
             data_source: str = 'Unknown'
     ) -> int:
         if df is None or df.empty:
@@ -1499,6 +1622,9 @@ class DatabaseManager:
                     row_date = parse_row_date(row.get('date'))
                     end_date = parse_row_date(row.get('end_date'))
 
+                    if end_date < start_date:
+                        logger.info(f"end date: [{end_date}] start date: [{start_date}], row date: [{row_date}]")
+                        continue
 
                     # === 步骤2：检查记录是否已存在（UPSERT核心）===
                     # 查询条件：相同的股票代码 + 相同的交易日期
@@ -1618,6 +1744,7 @@ class DatabaseManager:
             self,
             df: pd.DataFrame,
             code: str,
+            start_date: Optional[date] = None,
             data_source: str = 'Unknown'
     ) -> int:
         if df is None or df.empty:
@@ -1637,6 +1764,9 @@ class DatabaseManager:
                     row_date = parse_row_date(row.get('date'))
                     e_date = parse_row_date(row.get('end_date'))
 
+                    if row_date < start_date:
+                        logger.info(f"row date: [{row_date}], start date: [{start_date}], end date: [{e_date}]")
+                        continue
 
                     # === 步骤2：检查记录是否已存在（UPSERT核心）===
                     # 查询条件：相同的股票代码 + 相同的交易日期
@@ -1880,11 +2010,12 @@ class DatabaseManager:
                 daily_today_data.ema200,
             )
 
-        week_recent_data = self.get_latest_weekly_data(code, 2)
+        week_recent_data = self.get_latest_weekly_data(code, 3)
         if week_recent_data:
             week_today_data = week_recent_data[0]
-            if len(week_recent_data) > 1:
-                week_yesterday_data = week_today_data[1]
+            context["week_today_data"] = week_today_data.to_dict()
+            if len(week_recent_data) >= 2:
+                week_yesterday_data = week_recent_data[1]
                 if week_yesterday_data:
                     context['week_yesterday'] = week_yesterday_data.to_dict()
                     # 计算成交量变化(今日成交量 / 昨日成交量）
@@ -1908,11 +2039,12 @@ class DatabaseManager:
         else :
             logger.warning(f"daily data is null for {code}")
 
-        month_recent_data = self.get_latest_month_data(code, 2)
+        month_recent_data = self.get_latest_month_data(code, 3)
         if month_recent_data:
             month_today_data = month_recent_data[0]
-            if len(month_recent_data) > 1:
-                month_yesterday_data = month_today_data[1]
+            context["month_today_data"] = month_today_data.to_dict()
+            if len(month_recent_data) >= 2:
+                month_yesterday_data = month_recent_data[1]
                 if month_yesterday_data:
                     context['month_yesterday'] = month_yesterday_data.to_dict()
                     # 计算成交量变化(今日成交量 / 昨日成交量）

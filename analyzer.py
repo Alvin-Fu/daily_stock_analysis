@@ -848,6 +848,8 @@ class GeminiAnalyzer:
             stock_name = STOCK_NAME_MAP.get(code, f'股票{code}')
             
         today = context.get('today', {})
+        week_today_data = today.get('week_today_data', {})
+        month_today_data = today.get('month_today_data', {})
         
         # ========== 构建决策仪表盘格式的输入 ==========
         prompt = f"""# 决策仪表盘分析请求
@@ -875,7 +877,7 @@ class GeminiAnalyzer:
 | 成交额 | {self._format_amount(today.get('amount'))} |
 
 ### 均线系统（关键判断指标）
-| 均线 | 数值 | 说明 |
+| 日均线 | 数值 | 说明 |
 |------|------|------|
 | MA5 | {today.get('ma5', 'N/A')} | 短期趋势线 |
 | MA10 | {today.get('ma10', 'N/A')} | 中短期趋势线 |
@@ -883,7 +885,28 @@ class GeminiAnalyzer:
 | MA50 | {today.get('ma50', 'N/A')} | 中期趋势线 |
 | MA120 | {today.get('ma120', 'N/A')} | 中长期趋势线 |
 | MA200 | {today.get('ma200', 'N/A')} | 长期趋势线 |
-| 均线形态 | {context.get('ma_status', '未知')} | 多头/空头/缠绕 |
+| 均线形态 | {context.get('daily_ma_status', '未知')} | 多头/空头/缠绕 |
+| 均线形态 | {context.get('daily_ema_status', '未知')} | 多头/空头/缠绕 |
+| 周均线 | 数值 | 说明 |
+|------|------|------|
+| MA5 | {week_today_data.get('ma5', 'N/A')} | 短期趋势线 |
+| MA10 | {week_today_data.get('ma10', 'N/A')} | 中短期趋势线 |
+| MA20 | {week_today_data.get('ma20', 'N/A')} | 中期趋势线 |
+| MA50 | {week_today_data.get('ma50', 'N/A')} | 中期趋势线 |
+| MA120 | {week_today_data.get('ma120', 'N/A')} | 中长期趋势线 |
+| MA200 | {week_today_data.get('ma200', 'N/A')} | 长期趋势线 |
+| 均线形态 | {context.get('weekly_ma_status', '未知')} | 多头/空头/缠绕 |
+| 均线形态 | {context.get('weekly_ema_status', '未知')} | 多头/空头/缠绕 |
+| 月均线 | 数值 | 说明 |
+|------|------|------|
+| MA5 | {month_today_data.get('ma5', 'N/A')} | 短期趋势线 |
+| MA10 | {month_today_data.get('ma10', 'N/A')} | 中短期趋势线 |
+| MA20 | {month_today_data.get('ma20', 'N/A')} | 中期趋势线 |
+| MA50 | {month_today_data.get('ma50', 'N/A')} | 中期趋势线 |
+| MA120 | {month_today_data.get('ma120', 'N/A')} | 中长期趋势线 |
+| MA200 | {month_today_data.get('ma200', 'N/A')} | 长期趋势线 |
+| 均线形态 | {context.get('month_ma_status', '未知')} | 多头/空头/缠绕 |
+| 均线形态 | {context.get('month_ema_status', '未知')} | 多头/空头/缠绕 |
 """
         
         # 添加实时行情数据（量比、换手率等）
@@ -988,6 +1011,7 @@ class GeminiAnalyzer:
 3. ❓ 量能是否配合（缩量回调/放量突破）？
 4. ❓ 筹码结构是否健康？
 5. ❓ 消息面有无重大利空？（减持、处罚、业绩变脸等）
+6. ❓ 是否满足 MA5>MA10>MA20>MA50>MA120>MA200 多头排列？
 
 ### 决策仪表盘要求：
 - **核心结论**：一句话说清该买/该卖/该等

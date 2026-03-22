@@ -18,6 +18,7 @@ import logging
 import random
 import time
 import sqlite3
+import traceback
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
@@ -153,7 +154,8 @@ class BaseFetcher(ABC):
 
     def get_daily_data(
         self, 
-        stock_code: str, 
+        stock_code: str,
+        df_db: Optional[pd.DataFrame] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         days: int = 30
@@ -197,6 +199,8 @@ class BaseFetcher(ABC):
             
             # Step 2: 标准化列名
             df = self._normalize_data(raw_df, stock_code)
+
+            df = merge_and_clean_data("date", df_db, df)
             
             # Step 3: 数据清洗
             df = self._clean_data(df)
@@ -208,8 +212,9 @@ class BaseFetcher(ABC):
             return df
             
         except Exception as e:
-            logger.error(f"[{self.name}] 获取 {stock_code} 失败: {str(e)}")
-            raise DataFetchError(f"[{self.name}] {stock_code}: {str(e)}") from e
+            logger.error(f"[{self.name}] 获取 {stock_code} 失败: {str(e)} {traceback.format_exc()}")
+            raise DataFetchError(f"[{self.name}] {stock_code}: {str(e)} ") from e
+
 
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -244,37 +249,58 @@ class BaseFetcher(ABC):
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         计算技术指标
-        
+
         计算指标：
         - MA5, MA10, MA20: 移动平均线
         - Volume_Ratio: 量比（今日成交量 / 5日平均成交量）
         """
         df = df.copy()
         df = self._calculate_macd_signal(df)
-        
-        # 移动平均线
-        df['ma5'] = df['close'].rolling(window=5, min_periods=1).mean()
-        df['ma10'] = df['close'].rolling(window=10, min_periods=1).mean()
-        df['ma20'] = df['close'].rolling(window=20, min_periods=1).mean()
-        df['ma50'] = df['close'].rolling(window=50, min_periods=1).mean()
-        df['ma120'] = df['close'].rolling(window=120, min_periods=1).mean()
-        df['ma200'] = df['close'].rolling(window=200, min_periods=1).mean()
+        df = self.calculate_ma_ema(df, "close")
         logging.warning(f"{df['ma200'][-10:]}200天线")
         logging.warning(f"{df['ma5'][-10:]}均线")
-        
+
         # 量比：当日成交量 / 5日平均成交量
         avg_volume_5 = df['volume'].rolling(window=5, min_periods=1).mean()
         df['volume_ratio'] = df['volume'] / avg_volume_5.shift(1)
-        df['volume_ratio'] = df['volume_ratio'].fillna(1.0)
-        for period in [5, 10, 20, 50, 120, 200]:
-            df[f'sma_{period}'] = df['close'].ewm(
-                span=period, adjust=False
-            ).mean().round(2)
-        # 保留2位小数
-        for col in ['ma5', 'ma10', 'ma20', 'ma50', 'ma120', 'ma200', 'volume_ratio']:
-            if col in df.columns:
-                df[col] = df[col].round(2)
+        df['volume_ratio'] = df['volume_ratio'].fillna(1.0).round(2)
         logger.info(f"calculate indicators success")
+        return df
+
+    def calculate_ma_ema(
+            self,
+            df: pd.DataFrame,
+            price_col: str = 'close',
+            ma_periods: list = [5, 10, 20, 50, 120, 200],
+            ema_periods: list = [5, 10, 20, 50, 120, 200]
+    ) -> pd.DataFrame:
+        """
+        计算MA（均线）和EMA（指数均线）
+        :param df: 周线/月线DataFrame（需包含price_col字段）
+        :param price_col: 计算基准字段（默认收盘价close）
+        :param ma_periods: 要计算的MA周期（如[5,10,20]周/月）
+        :return: 新增MA/EMA列的DataFrame
+        """
+        df = df.copy()
+        if df.empty or price_col not in df.columns:
+            return df
+        df = df.sort_values(by='date', ascending=True).reset_index(drop=True)
+        # ---------------------- 1. 计算MA（简单移动平均） ----------------------
+        for period in ma_periods:
+            # rolling(window=period)：固定周期窗口；min_periods=1：数据不足时也计算
+            ma = df[price_col].rolling(window=period, min_periods=1).mean().round(2)
+            key = f'ma{period}'
+            logger.warning(f"ma key: [{key}]")
+            df[key] = ma
+
+        # ---------------------- 2. 计算EMA（指数移动平均） ----------------------
+        for period in ema_periods:
+            # ewm(span=period)：指数加权窗口；adjust=False：使用递归公式（行业标准）
+            ema = df[price_col].ewm(span=period, adjust=False, min_periods=1).mean().round(2)
+            key = f'ema{period}'
+            logger.warning(f"ma key: [{key}]")
+            df[key] = ema
+        df = df.sort_values(by='date', ascending=False).reset_index(drop=True)
         return df
 
     def _calculate_macd_signal(
@@ -293,7 +319,7 @@ class BaseFetcher(ABC):
         df.loc[(df['DIF'].shift(1) <= df['DEA'].shift(1)) & (df['DIF'] > df['DEA']), 'macd_signal'] = 1
         df.loc[(df['DIF'].shift(1) >= df['DEA'].shift(1)) & (df['DIF'] < df['DEA']), 'macd_signal'] = -1
         return df
-    
+
     @staticmethod
     def random_sleep(min_seconds: float = 1.0, max_seconds: float = 3.0) -> None:
         """
@@ -377,6 +403,7 @@ class DataFetcherManager:
     def get_daily_data(
         self, 
         stock_code: str,
+        df_db: Optional[pd.DataFrame] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         days: int = 30
@@ -409,6 +436,7 @@ class DataFetcherManager:
                 logger.info(f"尝试使用 [{fetcher.name}] 获取 {stock_code}...")
                 df = fetcher.get_daily_data(
                     stock_code=stock_code,
+                    df_db=df_db,
                     start_date=start_date,
                     end_date=end_date,
                     days=days
@@ -434,5 +462,30 @@ class DataFetcherManager:
     def available_fetchers(self) -> List[str]:
         """返回可用数据源名称列表"""
         return [f.name for f in self._fetchers]
+
+def merge_and_clean_data( date_field: str, df_db, df_new):
+    """
+        核心逻辑：
+        1. 合并存量+增量数据
+        2. 按日期去重（保留增量数据，即最后一条）
+        3. 按日期升序排序
+        """
+    # 步骤1：合并数据
+    df_merged = pd.concat([df_db, df_new], ignore_index=True)
+
+    # 步骤2：按日期去重（关键！保留最后一行=增量数据覆盖存量重复数据）
+    # 若想保留存量数据，把 keep="last" 改为 keep="first"
+    df_dedup = df_merged.drop_duplicates(
+        subset=[date_field],  # 按日期去重（股票数据核心去重维度）
+        keep="last"  # 重复时保留最后一行（增量数据）
+    )
+
+    # 步骤3：按日期升序排序（时间序列数据必备）
+    df_sorted = df_dedup.sort_values(
+        by= date_field,
+        ascending=True  # 升序=从早到晚排序
+    ).reset_index(drop=True)  # 重置索引，避免混乱
+
+    return df_sorted
 
 
