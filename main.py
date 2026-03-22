@@ -85,8 +85,6 @@ A股自选股智能分析系统 - 主调度程序
 """
 import os
 
-from fontTools.misc.plistlib import end_date
-
 # 代理配置 - 仅在本地环境使用，GitHub Actions 不需要
 if os.getenv("GITHUB_ACTIONS") != "true":
     # 本地开发环境，如需代理请取消注释或修改端口
@@ -118,7 +116,6 @@ from search_service import SearchService
 from stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 from market_analyzer import MarketAnalyzer
 from data_provider.calculate import CalculateFetcher
-import pandas as pd
 
 
 # 配置日志格式
