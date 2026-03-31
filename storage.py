@@ -4,10 +4,17 @@
 数据库管理
 """
 import logging
-from datetime import datetime, date
-from typing import Optional, List, Dict, Any
+import os
+import io
+from datetime import datetime, date, timedelta
+from typing import Optional, List, Dict, Any, Mapping
+
+from PIL.PdfParser import pdf_repr
+from pandas.core.computation.expressions import where
+from sqlalchemy import create_engine, Column, Integer, String, Text, JSON
 
 import pandas as pd
+import requests
 
 
 from sqlalchemy import (
@@ -693,6 +700,141 @@ class StockMoneyFlow(Base):
             'data_source': self.data_source
         }
 
+class StockResearchReport(Base):
+    """
+    股票调研报告模型 - ORM映射类
+
+    数据库表: stock_research_report
+    功能：存储股票调研报告数据
+
+    设计原则：
+    1. 完整性：包含调研报告核心维度
+    2. 唯一性：(code, date, pdf_name)复合唯一约束
+    3. 可追溯：记录数据来源和更新时间
+    4. 高性能：(code, date)复合索引优化查询
+
+    字段说明：
+    • 标识字段：code（股票代码）、date（调研日期）
+    • 调研数据：title（调研标题）、content（调研内容）
+    """
+    __tablename__ = 'stock_research_report'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)  # 日期
+    pdf_name = Column(String(100), nullable=False, index=True)  # PDF文件名
+    report_name = Column(String(200), nullable=False)  # 报告名称
+    east_rating = Column(String(10))   # 评级
+    rating_agency = Column(String(20))  # 评级机构
+    month_research_count = Column(Integer)  # 近一个月研报数
+    industry = Column(String(200))  # 行业
+    share_year1 = Column(String(10))
+    ratio_yaar1 = Column(String(10))
+    forecasting_earning_per_share1 = Column(Float) # 每股收益
+    Predicted_price_earnings_ratio1 = Column(Float)
+    share_year2 = Column(String(10))
+    ratio_yaar2 = Column(String(10))
+    forecasting_earning_per_share2 = Column(Float)
+    Predicted_price_earnings_ratio2 = Column(Float)
+    share_year3 = Column(String(10))
+    ratio_yaar3 = Column(String(10))
+    forecasting_earning_per_share3 = Column(Float)
+    Predicted_price_earnings_ratio3 = Column(Float)
+    downloaded_path = Column(String(200))  # 下载路径
+    report_pdf_link = Column(String(200))  # 报告PDF链接
+    data_source = Column(String(50))  # 数据来源（如：EastMoneyFetcher）
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('code', 'pdf_name', name='uix_research_report_code_pdf'),
+        Index('ix_research_report_code_date_pdf', 'code', 'date', 'pdf_name'),
+    )
+
+    def __repr__(self):
+        return f"<StockResearchReport(code={self.code}, date={self.date}, pdf_name={self.pdf_name}, title={self.title})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，便于数据交互"""
+        return {
+            'code': self.code,
+            'date': self.date,
+            'pdf_name': self.pdf_name,
+            'title': self.title,
+            'east_rating': self.east_rating,
+            'rating_agency': self.rating_agency,
+            'month_research_count': self.month_research_count,
+            'industry': self.industry,
+            'share_year1': self.share_year1,
+            'ratio_yaar1': self.ratio_yaar1,
+            'forecasting_earning_per_share1': self.forecasting_earning_per_share1,
+            'Predicted_price_earnings_ratio1': self.Predicted_price_earnings_ratio1,
+            'share_year2': self.share_year2,
+            'ratio_yaar2': self.ratio_yaar2,
+            'forecasting_earning_per_share2': self.forecasting_earning_per_share2,
+            'Predicted_price_earnings_ratio2': self.Predicted_price_earnings_ratio2,
+            'share_year3': self.share_year3,
+            'ratio_yaar3': self.ratio_yaar3,
+            'forecasting_earning_per_share3': self.forecasting_earning_per_share3,
+            'Predicted_price_earnings_ratio3': self.Predicted_price_earnings_ratio3,
+            'downloaded_path': self.downloaded_path,
+            'data_source': self.data_source,
+
+        }
+
+class StockResearchReportAnalyze(Base):
+    """
+    股票调研报告分析模型 - ORM映射类
+    """
+    __tablename__ = 'stock_research_report_analyze'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)  # 日期
+    pdf_name = Column(String(100), nullable=False, index=True)  # PDF文件名
+    analyze_content = Column(Text)  # 分析内容
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    __table_args__ = (
+        UniqueConstraint('code', 'pdf_name', name='uix_research_report_analyze_code_pdf'),
+        Index('ix_research_report_analyze_code_date_pdf', 'code', 'date', 'pdf_name'),
+    )
+
+    def __repr__(self):
+        return f"<StockResearchReportAnalyze(code={self.code}, date={self.date}, pdf_name={self.pdf_name}, analyze_content={self.analyze_content})>"
+
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，便于数据交互"""
+        return {
+            'code': self.code,
+            'date': self.date,
+            'pdf_name': self.pdf_name,
+            'analyze_content': self.analyze_content,
+        }
+class DailyTask(Base):
+    """
+    每日任务状态状态模型 - ORM映射类
+    """
+    __tablename__ = 'daily_task'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, index=True)
+    task_name = Column(String(50), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)  # 日期
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    __table_args__ = (
+        UniqueConstraint('code', 'task_name', name='uix_daily_task_code_task_name'),
+        Index('ix_daily_task_code_task_name_date', 'code', 'task_name', 'date'),
+    )
+
+    def __repr__(self):
+        return f"<DailyTask(code={self.code}, task_name={self.task_name}, date={self.date})>"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式，便于数据交互"""
+        return {
+            'code': self.code,
+            'task_name': self.task_name,
+            'date': self.date,
+        }
+
+
 class DatabaseManager:
     """
     数据库管理器
@@ -1177,6 +1319,54 @@ class DatabaseManager:
             ).scalars().all()
             return list(results)
 
+    def get_stock_daily_task(self, code: str) -> Dict[str, date]:
+        """
+        获取股票的任务状态信息
+
+        Args:
+            code: 股票代码
+
+        Returns:
+            Dict[str, date]: 任务名称到执行日期的映射字典
+            示例：{'daily_data': datetime.date(2026, 3, 29), 'weekly_data': datetime.date(2026, 3, 28)}
+
+        使用场景:
+            1. 检查各个任务的最后执行时间
+            2. 判断哪些任务今天已执行，哪些需要执行
+            3. 配合每日只执行一次的设计模式
+        """
+        result = {}
+        with self.get_session() as session:
+            results = session.execute(
+                select(DailyTask).where(
+                    DailyTask.code == code
+                ).order_by(
+                    desc(DailyTask.date)
+                )
+            ).scalars().all()
+
+            # 构建任务名称到最新执行日期的映射字典
+            for task in results:
+                # 如果任务名不存在，则添加（保证是最新的日期）
+                result[task.task_name] = task.date
+
+        return result
+
+    def get_stock_research_report_days(self, code: str, days: int = 30):
+        """
+        获取最近一段时间的研报
+        """
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockResearchReport)
+                .where(
+                    and_(
+                        StockResearchReport.code == code,
+
+                    )
+                )
+                .order_by(desc(StockResearchReport.date))
+            )
 
     def save_stock_basic(self, df: pd.DataFrame) -> int:
         """存储股票基本数据"""
@@ -1479,7 +1669,6 @@ class DatabaseManager:
                         row_date = row_date.date()
 
                     if  row_date < start_date:
-                        logger.info(f"row date: [{row_date}] start date: [{start_date}]")
                         continue
 
                     # === 步骤2：检查记录是否已存在（UPSERT核心）===
@@ -1617,7 +1806,6 @@ class DatabaseManager:
                     end_date = parse_row_date(row.get('end_date'))
 
                     if end_date < start_date:
-                        logger.info(f"end date: [{end_date}] start date: [{start_date}], row date: [{row_date}]")
                         continue
 
                     # === 步骤2：检查记录是否已存在（UPSERT核心）===
@@ -1759,7 +1947,6 @@ class DatabaseManager:
                     e_date = parse_row_date(row.get('end_date'))
 
                     if row_date < start_date:
-                        logger.info(f"row date: [{row_date}], start date: [{start_date}], end date: [{e_date}]")
                         continue
 
                     # === 步骤2：检查记录是否已存在（UPSERT核心）===
@@ -1956,6 +2143,506 @@ class DatabaseManager:
                 # 这是重要的设计：不吞没异常，让上层决定如何处理
                 raise
 
+        return saved_count
+
+    def save_stock_research_report_analysis(
+        self,
+        report_analysis: List[Dict[str, Any]],
+        code: str,
+    ) -> int:
+        """
+        保存股票研究报告分析数据到数据库
+        """
+        saved_count = 0
+        with self.get_session() as session:
+            try:
+                for item in report_analysis:
+                    pdf_name = item["pdf_name"]
+                    existing = session.execute(
+                        select(StockResearchReportAnalyze).where(
+                            and_(
+                                StockResearchReportAnalyze.code == code,
+                                StockResearchReportAnalyze.pdf_name == pdf_name
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if not existing:
+                        an = StockResearchReportAnalyze(
+                            code=code,
+                            pdf_name=pdf_name,
+                            date = item["date"],
+                            analyze_content = item["analyze_content"],
+                        )
+                        an.updated_at = datetime.now()
+                        session.add(an)
+                        saved_count += 1
+                session.commit()
+                logger.info(f"保存 {code} 数据成功，新增 {saved_count} 条记录")
+            except Exception as e:
+                session.rollback()
+                logger.error(f"保存 {code} 数据失败: {e}")
+                raise
+        return saved_count
+
+    def get_stock_research_report_analysis_pdf_names(
+        self,
+        code: str,
+    ) -> Dict[str, int]:
+        """
+        获取股票研究报告分析数据
+        """
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockResearchReportAnalyze.pdf_name).where(
+                    StockResearchReportAnalyze.code == code
+                )
+            ).scalars().all()
+            pdf_name_count = {}
+            for pdf_name in results:
+                pdf_name_count[pdf_name] = True
+            return pdf_name_count
+
+    # 获取最近N天的数据
+    def get_stock_research_report_last_days(self, code: str, days: int = 30) -> List[str]:
+        """
+        获取股票N天的研究报告数据
+        """
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockResearchReportAnalyze.analyze_content).where(
+                    and_(
+                        StockResearchReportAnalyze.code == code,
+                        StockResearchReportAnalyze.date >= (date.today() - timedelta(days=days))
+                    )
+                )
+            ).scalars().all()
+            analyze_content = [result for result in results]
+            return analyze_content
+
+    def save_stock_research_report(
+        self,
+        df: pd.DataFrame,
+        code: str,
+    ) -> int:
+        """保存股票研究报告数据到数据库"""
+        if df is None or df.empty:
+            logger.warning(f"保存数据为空，跳过 {code}")
+            return 0
+        save_count = 0
+        with self.get_session() as session:
+            try:
+                for _, row in df.iterrows():
+                    date = parse_row_date(row.get("date"))
+                    pdf_name = row.get("pdf_name")
+
+                    half_year_ago = date.today() - timedelta(days=90)
+
+                    # 如果研报日期早于半年前，跳过
+                    if date < half_year_ago:
+                        logger.debug(
+                            f"[{code}] 研报 {pdf_name} 日期 ({date}) 早于半年前 ({half_year_ago})，已忽略")
+                        continue
+
+                    existing = session.execute(
+                        select(StockResearchReport).where(
+                            and_(
+                                StockResearchReport.code == code,
+                                StockResearchReport.date == date,
+                                StockResearchReport.pdf_name == pdf_name
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if not existing:
+                        record = StockResearchReport(
+                            code=code,
+                            date=date,
+                            pdf_name=pdf_name,
+                            report_name=row.get("report_name"),
+                            east_rating=row.get("east_rating"),
+                            rating_agency=row.get("rating_agency"),
+                            month_research_count=row.get("month_research_count"),
+                            industry= row.get("industry"),
+                            report_pdf_link=row.get("report_pdf_link"),
+                            share_year1=row.get("share_year1"),
+                            ratio_year1=row.get("ratio_year1"),
+                            forecasting_earning_per_share1 = row.get("forecasting_earning_per_share1"),
+                            Predicted_price_earnings_ratio1 = row.get("Predicted_price_earnings_ratio1"),
+                            share_year2=row.get("share_year2"),
+                            ratio_year2=row.get("ratio_year2"),
+                            forecasting_earning_per_share2 = row.get("forecasting_earning_per_share2"),
+                            Predicted_price_earnings_ratio2 = row.get("Predicted_price_earnings_ratio2"),
+                            share_year3=row.get("share_year3"),
+                            ratio_year3=row.get("ratio_year3"),
+                            forecasting_earning_per_share3 = row.get("forecasting_earning_per_share3"),
+                            Predicted_price_earnings_ratio3 = row.get("Predicted_price_earnings_ratio3"),
+                            updated_at=datetime.now(),
+                        )
+                        session.add(record)
+                        save_count += 1
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                logger.error(f"保存 {code} 数据失败: {e}")
+
+        return save_count
+
+    def download_research_report(self, url: str, filename: str = None, stock_code: str = None) -> Dict[str, Any]:
+        """
+        下载PDF文件
+
+        参数:
+            url: PDF链接
+            filename: 自定义文件名（可选）
+            stock_code: 股票代码（可选，用于组织文件）
+            report_date: 报告日期（可选，用于组织文件）
+
+        返回:
+            Dict: 包含下载结果的字典
+        """
+        result = {
+            'success': False,
+            'file_path': None,
+            'error': None,
+            'file_size': 0
+        }
+
+        try:
+            # 验证URL
+            if not url or not url.startswith(('http://', 'https://')):
+                result['error'] = f"无效的URL: {url}"
+                logger.error(result['error'])
+                return result
+
+            # 生成文件名
+            if not filename:
+                result['error'] = f"无效的文件名: {filename}"
+                logger.error(result['error'])
+                return result
+
+            if not self.is_valid_pdf_filename(filename):  # 验证文件名是否有效
+                filename = f"{filename}.pdf"
+
+            pdf_path = get_config().get_pdf_dir()
+            # 创建子目录（如果提供了股票代码）
+            if stock_code:
+                stock_dir = pdf_path/stock_code
+                stock_dir.mkdir(exist_ok=True)
+                file_path = stock_dir / filename
+            else:
+                file_path = pdf_path / filename
+
+            # 检查文件是否已存在
+            if file_path.exists():
+                result['success'] = True
+                result['file_path'] = str(file_path)
+                result['file_size'] = file_path.stat().st_size
+                logger.info(f"PDF文件已存在: {file_path}")
+                return result
+
+            # 下载PDF
+            logger.info(f"开始下载PDF: {url}")
+
+            response = requests.get(url, stream=True, timeout=30)
+            response.raise_for_status()
+
+            # 检查内容类型
+            content_type = response.headers.get('content-type', '').lower()
+            if 'pdf' not in content_type and 'application/pdf' not in content_type:
+                logger.warning(f"URL可能不是PDF文件，内容类型: {content_type}")
+
+            # 保存文件
+            file_content = bytearray()
+            with open(file_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        file_content.extend(chunk)
+
+            # 验证文件
+            file_size = file_path.stat().st_size
+            if file_size == 0:
+                file_path.unlink()  # 删除空文件
+                result['error'] = "下载的文件为空"
+                logger.error(result['error'])
+                return result
+            content = self.extract_text_from_pdf_content(file_content)
+            result['success'] = True
+            result['file_path'] = str(file_path)
+            result['file_size'] = file_size
+            result['file_content'] = content
+
+            logger.info(f"PDF下载成功: {file_path} {len(content)}({file_size} bytes)")
+        except Exception as e:
+            result['error'] = f"下载失败: {e}"
+            logger.error(result['error'])
+
+        return result
+
+    def extract_text_from_pdf_content(self, file_content: bytes) -> str | None:
+        """
+        从 PDF 二进制内容中提取文本
+
+        参数:
+            file_content: PDF 文件的二进制内容（bytes 或 bytearray）
+
+        返回:
+            str: 提取的文本内容
+        """
+        try:
+            import PyPDF2
+
+            # 将 bytes 转换为文件对象
+            pdf_file = io.BytesIO(bytes(file_content))
+
+            # 读取 PDF
+            reader = PyPDF2.PdfReader(pdf_file)
+            print(f"[PDF 提取] 共 {len(reader.pages)} 页")
+
+            # 提取前几页的内容（避免 token 超限）
+            max_pages = min(len(reader.pages), 10)
+            text_content = []
+
+            for i, page in enumerate(reader.pages[:max_pages]):
+                text = page.extract_text()
+                if text:
+                    text_content.append(f"=== 第 {i + 1} 页 ===\n{text}")
+                    print(f"[PDF 提取] 第 {i + 1} 页提取成功，{len(text)} 字符")
+                else:
+                    print(f"[PDF 提取] 第 {i + 1} 页无法提取文本（可能是图片或扫描版）")
+
+            # 合并为字符串
+            full_text = "\n\n".join(text_content)
+            print(f"[PDF 提取] 总共提取 {len(full_text)} 字符")
+
+            return full_text
+
+        except ImportError:
+            print("[PDF 提取] 未安装 PyPDF2，请运行：pip install PyPDF2")
+            return None
+        except Exception as e:
+            print(f"[PDF 提取] 提取失败：{e}")
+            return None
+
+    def  is_valid_pdf_filename(self, filename):
+        """
+        验证是否为有效的PDF文件名
+        规则：以.pdf结尾，且.pdf前必须有文件名
+        """
+        # 转换为小写处理
+        filename_lower = filename.lower()
+
+        # 检查是否以.pdf结尾
+        if not filename_lower.endswith('.pdf'):
+            return False
+
+        # 检查.pdf前是否有文件名（不能只是".pdf"）
+        if filename_lower == '.pdf':
+            return False
+
+        # 检查是否包含路径分隔符（可选）
+        if os.path.sep in filename:
+            # 提取纯文件名
+            basename = os.path.basename(filename)
+            # 检查纯文件名是否有效
+            return len(basename) > 4  # 至少"x.pdf"
+
+        # 纯文件名：长度至少为5（如"a.pdf"）
+        return len(filename) >= 5
+
+    def download_research_report_pdf(self, research_report: 'StockResearchReport'):
+        """
+        下载研究报告的PDF文件
+
+        参数:
+            research_report: StockResearchReport实例
+
+        返回:
+            Dict: 包含下载结果的字典
+        """
+        if not research_report.report_pdf_link:
+            logger.warning(f"无效的PDF URL")
+            return
+
+        # 生成文件名
+        filename = f"{research_report.code}_{research_report.date}_{research_report.pdf_name}.pdf"
+
+        # 下载PDF
+        result = self.download_research_report(
+            url=research_report.report_pdf_link,
+            filename=filename,
+            stock_code=research_report.code,
+            report_date=str(research_report.date)
+        )
+
+        # 如果下载成功，更新数据库中的下载路径
+        if result['success']:
+            research_report.downloaded_path = result['file_path']
+
+        return result
+
+    def batch_download_pdfs(self, research_reports: List['StockResearchReport']) -> Dict[str, Any]:
+        """
+        批量下载PDF文件
+
+        参数:
+            research_reports: StockResearchReport列表
+
+        返回:
+            Dict: 包含批量下载结果的字典
+        """
+        results = {
+            'total': len(research_reports),
+            'success': 0,
+            'failed': 0,
+            'details': []
+        }
+
+        for report in research_reports:
+            result = self.download_research_report_pdf(report)
+            result['report'] = {
+                'code': report.code,
+                'date': str(report.date),
+                'pdf_name': report.pdf_name
+            }
+
+            results['details'].append(result)
+
+            if result['success']:
+                results['success'] += 1
+            else:
+                results['failed'] += 1
+
+        logger.info(f"批量下载完成: 总计 {results['total']}, 成功 {results['success']}, 失败 {results['failed']}")
+
+        return results
+
+    def get_downloaded_files(self, stock_code: str = None) -> List[Dict[str, Any]]:
+        """
+        获取已下载的PDF文件列表
+
+        参数:
+            stock_code: 股票代码（可选，用于筛选）
+
+        返回:
+            List[Dict]: 文件信息列表
+        """
+        files_info = []
+
+        search_dir = self.download_dir
+        if stock_code:
+            search_dir = search_dir / stock_code
+
+        if not search_dir.exists():
+            return files_info
+
+        for file_path in search_dir.rglob('*.pdf'):
+            if file_path.is_file():
+                stat = file_path.stat()
+                files_info.append({
+                    'file_path': str(file_path),
+                    'file_name': file_path.name,
+                    'file_size': stat.st_size,
+                    'modified_time': datetime.fromtimestamp(stat.st_mtime),
+                    'stock_code': file_path.parent.name if file_path.parent != self.download_dir else None
+                })
+
+        return files_info
+
+    def save_daily_task_data(self, code: str, task_names: List[str]) -> int:
+        """
+        保存每日任务信息（UPSERT 模式）
+
+        设计模式：UPSERT (Update or Insert)
+
+        核心功能：
+        1. 检查数据库中是否已存在今日的任务记录
+        2. 如果存在：更新日期和状态
+        3. 如果不存在：创建新的任务记录
+        4. 批量操作，统一提交，提高性能
+
+        Args:
+            code: 股票代码
+            task_names: 任务名称列表，如 ['daily_data', 'weekly_data']
+
+        Returns:
+            int: 新增的记录数（不包括更新的记录）
+
+        使用场景:
+            1. 数据抓取完成后，批量更新任务状态
+            2. 初始化每日任务列表
+            3. 标记某些任务为已完成
+
+        示例:
+            # 标记日常任务为已完成
+            db.save_daily_task_data('600519', ['daily_data', 'weekly_data'])
+
+            # 初始化任务为待执行状态
+            db.save_daily_task_data('000001', ['morning_check'], status='pending')
+        """
+        if task_names is None or len(task_names) == 0:
+            logger.warning(f"保存的任务名为空，跳过 {code}")
+            return 0
+
+        saved_count = 0  # 新增记录计数器
+        today = date.today()
+
+        with self.get_session() as session:
+            try:
+                # 步骤 1: 查询数据库中该股票的所有任务记录
+                db_results = session.execute(
+                    select(DailyTask).where(
+                        DailyTask.code == code
+                    )
+                ).scalars().all()
+
+                # 步骤 2: 将查询结果转换为字典 (key: task_name, value: DailyTaskStatus)
+                # 这样可以 O(1) 时间复杂度查找，而不是 O(n)
+                task_map: Dict[str, DailyTask] = {}
+                for task in db_results:
+                    task_map[task.task_name] = task
+
+                # 步骤 3: 遍历任务列表，执行 UPSERT 操作
+                for task_name in task_names:
+                    # 从字典中获取现有记录
+                    existing_task = task_map.get(task_name)
+
+                    if existing_task:
+                        # 情况 A: 记录已存在 → 执行 UPDATE
+                        # 只在日期或状态不同时才更新，避免不必要的写操作
+                        if existing_task.date != today:
+                            existing_task.date = today
+                            existing_task.updated_at = datetime.now()
+                            logger.debug(f"更新任务状态：{code} - {task_name}")
+                        # 注意：更新操作不计入 saved_count
+                    else:
+                        # 情况 B: 记录不存在 → 执行 INSERT
+                        record = DailyTask(
+                            code=code,
+                            task_name=task_name,
+                            date=today,
+                            updated_at=datetime.now()
+                        )
+                        session.add(record)
+                        saved_count += 1  # 新增计数
+                        logger.debug(f"新增任务记录：{code} - {task_name}")
+
+                # 步骤 4: 统一提交所有更改（重要！）
+                # 优点：1) 原子性 2) 性能优化 3) 数据一致性
+                session.commit()
+
+                # 记录成功日志
+                if saved_count > 0:
+                    logger.info(f"保存 {code} 任务数据成功，新增 {saved_count} 条记录")
+                else:
+                    logger.info(f"保存 {code} 任务数据成功，所有任务已存在（只更新不新增）")
+
+            except Exception as e:
+                # 步骤 5: 错误处理（事务回滚）
+                session.rollback()
+                logger.error(f"保存 {code} 任务数据失败：{e}")
+                raise
+
+        # 返回新增记录数
         return saved_count
 
     def get_analysis_context(

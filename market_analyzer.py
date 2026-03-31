@@ -353,7 +353,7 @@ class MarketAnalyzer:
             # 根据 analyzer 使用的 API 类型调用
             if self.analyzer._use_openai:
                 # 使用 OpenAI 兼容 API
-                review = self.analyzer._call_openai_api(prompt, generation_config)
+                review = self.analyzer._call_openai_api(self.analyzer.SYSTEM_PROMPT, prompt, generation_config)
             else:
                 # 使用 Gemini API
                 response = self.analyzer._model.generate_content(

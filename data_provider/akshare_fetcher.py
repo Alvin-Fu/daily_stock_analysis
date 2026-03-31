@@ -46,8 +46,10 @@ import random
 import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
+from .common import extract_last_segment_standard
 
 import pandas as pd
+from pandas import DataFrame
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -268,7 +270,7 @@ class AkshareFetcher(BaseFetcher):
     数据来源：东方财富网爬虫
     
     关键策略：
-    - 每次请求前随机休眠 2.0-5.0 秒
+    - 每次请求前随机休眠 10.0-50.0 秒
     - 随机 User-Agent 轮换
     - 失败后指数退避重试（最多3次）
     """
@@ -276,7 +278,7 @@ class AkshareFetcher(BaseFetcher):
     name = "AkshareFetcher"
     priority = 1
     
-    def __init__(self, sleep_min: float = 2.0, sleep_max: float = 5.0):
+    def __init__(self, sleep_min: float = 10.0, sleep_max: float = 50.0):
         """
         初始化 AkshareFetcher
         
@@ -936,7 +938,110 @@ class AkshareFetcher(BaseFetcher):
         except Exception as e:
             logger.error(f"[API错误] 获取 {stock_code} 筹码分布失败: {e}")
             return None
-    
+
+    def stock_research_report_em(self, stock_code: str) -> DataFrame | None:
+        """
+        获取股票研究报告数据
+
+        数据来源：ak.stock_research_report_em()
+        包含：报告标题、报告内容、报告日期
+        """
+        import akshare as ak
+
+        try:
+            # 防封禁策略
+            self._set_random_user_agent()
+            self._enforce_rate_limit()
+
+            logger.info(f"[API调用] ak.stock_research_report_em(symbol={stock_code}) 获取研究报告...")
+            import time as _time
+            api_start = _time.time()
+
+            df = ak.stock_research_report_em(symbol=stock_code)
+
+            api_elapsed = _time.time() - api_start
+
+            if df.empty:
+                logger.warning(f"[API返回] ak.stock_research_report_em 返回空数据, 耗时 {api_elapsed:.2f}s")
+                return None
+
+            # 如果启用了PDF链接分解功能
+            if '报告PDF链接' in df.columns:
+                df['pdf_name'] = df['报告PDF链接'].apply(extract_last_segment_standard)
+                logging.info(f"[数据处理] 已提取PDF链接的最后一段内容，新增'PDF文件名'列")
+
+            logger.info(f"[API返回] ak.stock_research_report_em 成功: 返回 {len(df)} 条数据, 耗时 {api_elapsed:.2f}s")
+            df = self._normalize_research_report_data(df, stock_code)
+
+            return df
+
+        except Exception as e:
+            logger.error(f"[API错误] 获取 {stock_code} 研究报告失败: {e}")
+            return None
+
+    def _normalize_research_report_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+        """
+        标准化股票研究报告数据
+
+        数据来源：ak.stock_research_report_em()
+        包含：报告标题、报告内容、报告日期
+
+        Args:
+            df: 输入数据
+            stock_code: 股票代码
+
+        Returns:
+            DataFrame 包含标准化后的数据
+        """
+        if df.empty:
+            return pd.DataFrame()
+        df = df.copy()
+
+        column_mapping = {
+            '日期': 'date',
+            '股票代码': 'code',
+            '股票简介': 'stock_intro',
+            '报告名称': 'report_name',
+            '东财评级': 'east_rating',
+            '机构': 'rating_agency',
+            '报告PDF链接': 'report_pdf_link',
+            '行业': 'industry',
+            '近一个月个股研报数':  'month_research_count',
+        }
+
+        # 获取所有列名
+        columns = df.columns.tolist()
+        # 查找包含"每股收益"的字段
+        index_share = 0
+        index_ratio = 0
+        for col in columns:
+            if '盈利预测-收益' in col:
+                # 尝试提取年份
+                import re
+                index_share += 1
+                year_match = re.search(r'(\d{4})', col)
+                df[f'forecasting_earning_per_share{index_share}'] = df[col]
+                if year_match:
+                    year = year_match.group(1)
+                    df[f'share_year{index_share}'] = year
+                else:
+                    logger.warning(f"[数据处理] 未找到年份信息，将使用默认值 '2023'")
+            if '盈利预测-市盈率' in col:
+                # 尝试提取年份
+                import re
+                index_ratio += 1
+                df[f'Predicted_price_earnings_ratio{index_ratio}'] = df[col]
+                year_match = re.search(r'(\d{4})', col)
+                if year_match:
+                    year = year_match.group(1)
+                    df[f'ratio_year{index_share}'] = year
+                else:
+                    logger.warning(f"[数据处理] 未找到年份信息，将使用默认值 '2023'")
+
+        df = df.rename(columns=column_mapping)
+
+        return df
+
     def get_enhanced_data(self, stock_code: str, days: int = 60) -> Dict[str, Any]:
         """
         获取增强数据（历史K线 + 实时行情 + 筹码分布）
@@ -969,6 +1074,7 @@ class AkshareFetcher(BaseFetcher):
         result['chip_distribution'] = self.get_chip_distribution(stock_code)
         
         return result
+
 
 
 if __name__ == "__main__":

@@ -486,8 +486,8 @@ class Config:
     • 索引优化：通过ORM模型定义索引
     • 事务控制：确保数据一致性
     """
-    database_path: str = "./data/stock_analysis.db"                      # 数据库文件路径
-    
+    database_path: str = "./data/stock_analysis.db" # 数据库文件路径
+    pdf_path: str = "./data/pdf/" # PDF文件存储路径
     # ===== 日志配置 (Logging Configuration) ===================================
     """
     日志系统配置：记录系统运行状态和问题排查
@@ -1133,6 +1133,12 @@ class Config:
         db_path = Path(self.database_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite:///{db_path.absolute()}"
+
+    def get_pdf_dir(self) -> Path:
+        """获取 PDF 文件保存目录"""
+        pdf_dir = Path(self.pdf_path)
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        return pdf_dir
 
 
 # === 便捷的配置访问函数 ===

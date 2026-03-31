@@ -559,11 +559,12 @@ class GeminiAnalyzer:
         """检查分析器是否可用"""
         return self._model is not None or self._openai_client is not None
     
-    def _call_openai_api(self, prompt: str, generation_config: dict) -> str:
+    def _call_openai_api(self, system_prompt: str, prompt: str, generation_config: dict) -> str:
         """
         调用 OpenAI 兼容 API
         
         Args:
+            system_prompt: 系统提示词
             prompt: 提示词
             generation_config: 生成配置
             
@@ -573,6 +574,8 @@ class GeminiAnalyzer:
         config = get_config()
         max_retries = config.gemini_max_retries
         base_delay = config.gemini_retry_delay
+        if system_prompt is None:
+            system_prompt = self.SYSTEM_PROMPT
         
         for attempt in range(max_retries):
             try:
@@ -585,11 +588,12 @@ class GeminiAnalyzer:
                 response = self._openai_client.chat.completions.create(
                     model=self._current_model_name,
                     messages=[
-                        {"role": "system", "content": self.SYSTEM_PROMPT},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=generation_config.get('temperature', 0.7),
                     max_tokens=generation_config.get('max_output_tokens', 8192),
+                    timeout=200,
                 )
                 
                 if response and response.choices and response.choices[0].message.content:
@@ -611,7 +615,7 @@ class GeminiAnalyzer:
         
         raise Exception("OpenAI API 调用失败，已达最大重试次数")
     
-    def _call_api_with_retry(self, prompt: str, generation_config: dict) -> str:
+    def _call_api_with_retry(self, system_prompt: str, prompt: str, generation_config: dict) -> str:
         """
         调用 AI API，带有重试和模型切换机制
         
@@ -623,6 +627,7 @@ class GeminiAnalyzer:
         3. Gemini 完全失败后尝试 OpenAI
         
         Args:
+            system_prompt: 系统提示词
             prompt: 提示词
             generation_config: 生成配置
             
@@ -631,7 +636,7 @@ class GeminiAnalyzer:
         """
         # 如果已经在使用 OpenAI 模式，直接调用 OpenAI
         if self._use_openai:
-            return self._call_openai_api(prompt, generation_config)
+            return self._call_openai_api(system_prompt, prompt, generation_config)
         
         config = get_config()
         max_retries = config.gemini_max_retries
@@ -685,7 +690,7 @@ class GeminiAnalyzer:
         if self._openai_client:
             logger.warning("[Gemini] 所有重试失败，切换到 OpenAI 兼容 API")
             try:
-                return self._call_openai_api(prompt, generation_config)
+                return self._call_openai_api(system_prompt, prompt, generation_config)
             except Exception as openai_error:
                 logger.error(f"[OpenAI] 备选 API 也失败: {openai_error}")
                 raise last_error or openai_error
@@ -695,7 +700,7 @@ class GeminiAnalyzer:
             self._init_openai_fallback()
             if self._openai_client:
                 try:
-                    return self._call_openai_api(prompt, generation_config)
+                    return self._call_openai_api(system_prompt, prompt, generation_config)
                 except Exception as openai_error:
                     logger.error(f"[OpenAI] 备选 API 也失败: {openai_error}")
                     raise last_error or openai_error
@@ -782,14 +787,14 @@ class GeminiAnalyzer:
             # 设置生成配置
             generation_config = {
                 "temperature": 0.7,
-                "max_output_tokens": 8192,
+                "max_output_tokens": 18192,
             }
             
             logger.info(f"[LLM调用] 开始调用 Gemini API (temperature={generation_config['temperature']}, max_tokens={generation_config['max_output_tokens']})...")
             
             # 使用带重试的 API 调用
             start_time = time.time()
-            response_text = self._call_api_with_retry(prompt, generation_config)
+            response_text = self._call_api_with_retry(self.SYSTEM_PROMPT, prompt, generation_config)
             elapsed = time.time() - start_time
             
             # 记录响应信息
@@ -1022,6 +1027,84 @@ class GeminiAnalyzer:
 请输出完整的 JSON 格式决策仪表盘。"""
         
         return prompt
+
+    def analyzer_research_report(self, content: str, stock_code: str = None) -> str:
+        """
+        股票研报解析
+        """
+        system_prompt, user_prompt = self._format_prompt_research_report(content, stock_code)
+
+        # 设置生成配置
+        generation_config = {
+            "temperature": 0.7,
+            "max_output_tokens": 10192,
+        }
+
+        logger.info(
+            f"[LLM调用] 开始调用 Gemini API report research (temperature={generation_config['temperature']}, "
+            f"max_tokens={generation_config['max_output_tokens']})...")
+        logger.info(f"[{len(user_prompt)}] user prompt: {user_prompt}")
+
+        # 使用带重试的 API 调用
+        start_time = time.time()
+        response_text = self._call_api_with_retry(system_prompt, user_prompt, generation_config)
+        elapsed = time.time() - start_time
+
+        # 记录响应信息
+        logger.info(f"[LLM返回] Gemini API report research 响应成功, 耗时 {elapsed:.2f}s, 响应长度 {len(response_text)} 字符")
+
+        return response_text
+
+    def _format_prompt_research_report(self, content: str, stock_code: str = None) -> tuple[str, str]:
+        """
+        格式化研究报告内容，添加股票代码
+        """
+        # 构建提示词
+        system_prompt = "你是一位专业的股票分析师，擅长解读研究报告和分析市场数据。请用简洁清晰的语言总结关键信息。"
+
+        user_prompt = f"请分析以下股票研究报告内容："
+        if stock_code:
+            user_prompt += f"\n股票代码：{stock_code}"
+        user_prompt += f"\n\n报告内容:\n{content}"
+        user_prompt += ("\n\n请从提供的券商研究报告原文中，**精准提取、不编造、不估算**核心数据，严格按照要求输出**纯JSON格式**，"
+                        "无任何多余文字、注释、解释。需提取的核心字段（固定英文Key）\n"
+                        "1. company_target：公司名称+股票代码\n"
+                        "2. investment_action：投资评级（买入/持有/卖出/维持买入等）\n"
+                        "3. target_price：目标价（分A股、H股，无则填null）\n"
+                        "4. potential_upside：目标价对应潜在涨幅（单位：%%）\n"
+                        "5. valuation_basis：估值定价依据（如PE/PB/DCF及对应倍数、年份）\n"
+                        "6. core_financials：\n"
+                        "- operating_revenue_rmb_mn：营业收入（单位：百万元人民币）\n"
+                        "- gross_profit_rmb_mn：毛利润\n"
+                        "- net_profit_rmb_mn：净利润\n"
+                        "7. growth_yoy：同比增速（YoY）\n"
+                        "- revenue_yoy\n"
+                        "- gross_profit_yoy\n"
+                        "- net_profit_yoy\n"
+                        "8. margins：利润率\n"
+                        "- gross_margin：毛利率\n"
+                        "- operating_margin：营业利润率\n"
+                        "- net_margin：净利润率\n"
+                        "9. valuation_ratios：估值倍数\n"
+                        "- pe_ratio（市盈率）\n"
+                        "- pb_ratio（市净率）\n"
+                        "10. cash_flow_indicators：\n"
+                        "- net_gearing：净负债率\n"
+                        "- operating_cash_flow_rmb_mn：经营活动现金流\n"
+                        "11. operation_turnover：运营周转天数\n"
+                        "- inventory_turnover_days\n"
+                        "- receivable_turnover_days\n"
+                        "- payable_turnover_days\n"
+                        "12. core_thesis：研报核心上涨/看多逻辑（精简3条内）\n"
+                        "13. key_risks：核心风险点\n"
+
+                        "### 格式强制要求\n"
+                        "1. 年度统一标注：FY2XA=实际值，FY2XE=预测值\n"
+                        "2. 数值保留原文精度，百分比带%符号\n"
+                        "3. 无数据字段填**null**\n"
+                        "4. 仅输出合法JSON，禁止任何额外内容\n"
+                        )
+        return system_prompt, user_prompt
     
     def _format_volume(self, volume: Optional[float]) -> str:
         """格式化成交量显示"""

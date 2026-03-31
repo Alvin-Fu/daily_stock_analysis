@@ -85,6 +85,8 @@ A股自选股智能分析系统 - 主调度程序
 """
 import os
 
+from const import TASK_NAME_DAILY_TASK
+
 # 代理配置 - 仅在本地环境使用，GitHub Actions 不需要
 if os.getenv("GITHUB_ACTIONS") != "true":
     # 本地开发环境，如需代理请取消注释或修改端口
@@ -105,7 +107,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from feishu_doc import FeishuDocManager
 
 from config import get_config, Config
-from storage import get_db
+from storage import get_db, parse_row_date
 from data_provider import DataFetcherManager
 from data_provider.base import  merge_and_clean_data
 from data_provider.tushare_fetcher import TushareFetcher, set_tushare_token
@@ -116,6 +118,7 @@ from search_service import SearchService
 from stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 from market_analyzer import MarketAnalyzer
 from data_provider.calculate import CalculateFetcher
+import pandas as pd
 
 
 # 配置日志格式
@@ -756,6 +759,98 @@ class StockAnalysisPipeline:
             error_msg = f"获取/保存每日指标数据失败: {str(e)}"
             logger.error(f"[{code}] {error_msg} {traceback.format_exc()}")
             return False, error_msg
+
+    def fetch_and_save_stock_research_report(
+        self,
+        code: str,
+        task_m: Dict[str, date]
+    ) -> Tuple[bool, Optional[str]]:
+        """获取和保存股票研究报告数据"""
+        try:
+            today = date.today()
+            task_date = task_m.get(TASK_NAME_DAILY_TASK)
+            if task_date == today:
+                logger.debug(f"[{code}] 今日研报数据已存在，跳过获取（断点续传）")
+                #return True, None
+
+            df = self.akshare_fetcher.stock_research_report_em( code)
+            if df is None or df.empty:
+                error_msg = f"akshare get stock research report err[{code}]"
+                logger.error(f"akshare get stock research report err[{code}]")
+                return False, error_msg
+            self.handle_research_report(code, df)
+
+            saved_count = self.db.save_stock_research_report(df, code)
+            logger.info(f"[{code}] 研报数据保存成功（，新增 {saved_count} 条）")
+            task_names = [TASK_NAME_DAILY_TASK]
+            self.db.save_daily_task_data(code, task_names)
+            return True, None
+
+        except Exception as e:
+            error_msg = f"akshare get stock research report err[{code}]"
+            logger.error(f"akshare get stock research report err[{code}], {traceback.format_exc()}")
+            return False, error_msg
+
+    def handle_research_report(self, code: str, df: pd.DataFrame):
+        """处理股票研究报告数据"""
+        if df is None or df.empty:
+            logger.error(f"股票研究报告数据为空")
+            return
+        logger.warning(f"获取的数据[{df.head(1)}]")
+        try:
+            pdf_name_m = self.db.get_stock_research_report_analysis_pdf_names(code)
+            logger.warning(f"已存在的研报[{pdf_name_m}]")
+            research_report_analysis: List[Dict[str, Any]] = []
+
+            for _, row in df.iterrows():
+                report_date = row.get("date")
+                if report_date is None:
+                    logger.error(f"[{code}] 研报[{report_date}]无日期")
+                    continue
+                report_date = parse_row_date(report_date)
+
+                half_year_ago = date.today() - timedelta(days=2)
+
+                # 如果研报日期早于半年前，跳过
+                if report_date < half_year_ago:
+                    logger.debug(f"[{code}] 研报 {pdf_name} 日期 ({report_date}) 早于 ({half_year_ago})，已忽略")
+                    continue
+
+                if report_date in pdf_name_m:
+                    continue
+
+                pdf_url = row.get("report_pdf_link")
+                if pdf_url is None:
+                    logger.error(f"[{code}] 研报[{report_date}]无pdf链接")
+                    continue
+                pdf_name = row.get("pdf_name")
+                if pdf_name in pdf_name_m:
+                     continue
+                res = self.db.download_research_report(pdf_url, pdf_name, code)
+                if res.get("error") is not None:
+                    logger.error(f"[{code}] 下载股票研报失败[{res.get('error')}]")
+                    continue
+                content = res.get("file_content")
+                if content is None:
+                    logger.error(f"[{code}] 获取股票研报内容失败")
+                    continue
+                analyze_content = self.analyzer.analyzer_research_report(content, code)
+                if analyze_content is None:
+                    logger.error(f"[{code}] 分析股票研报内容失败")
+                    continue
+                ai_analysis_m = {
+                    "analyze_content": analyze_content,  # 实际的字符串内容
+                    "code": code,  # 实际的股票代码
+                    "pdf_name": pdf_name,  # 实际的 PDF 文件名
+                    "date": row.get("date")  # 实际的日期对象
+                }
+                research_report_analysis.append(ai_analysis_m)
+
+            save_count = self.db.save_stock_research_report_analysis(research_report_analysis, code)
+            logger.warning(f"保存的数据为[{save_count}]")
+
+        except Exception as e:
+            logger.error(f"处理股票研报数据错误[{e}] {traceback.format_exc()}")
 
 
     def save_stock_basic_by_tushare(self):
@@ -1615,8 +1710,9 @@ class StockAnalysisPipeline:
         5. 内存管理：AnalysisResult对象较大，批量处理时注意内存使用
         """
         logger.info(f"========== 开始处理 {code} ==========")
-        
+        skip_analysis = True
         try:
+            tasks = self.db.get_stock_daily_task( code)
             # Step 1: 获取并保存数据
             success, error = self.fetch_and_save_stock_data(code)
             
@@ -1627,11 +1723,14 @@ class StockAnalysisPipeline:
             if not success:
                 logger.warning(f"[{code}] 周或者月数据获取失败: {error}")
 
+            success, error = self.fetch_and_save_stock_research_report( code, tasks)
+            if not success:
+                logger.warning(f"[{code}] 研究报告获取失败: {error}")
             # Step 2: AI 分析
             if skip_analysis:
                 logger.info(f"[{code}] 跳过 AI 分析（dry-run 模式）")
                 return None
-            
+
             result = self.analyze_stock(code)
             
             if result:

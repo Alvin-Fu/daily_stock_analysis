@@ -24,6 +24,7 @@ from .tushare_fetcher import TushareFetcher
 from .baostock_fetcher import BaostockFetcher
 from .yfinance_fetcher import YfinanceFetcher
 from .calculate import CalculateFetcher
+from .common import extract_last_segment_standard
 
 __all__ = [
     'BaseFetcher',

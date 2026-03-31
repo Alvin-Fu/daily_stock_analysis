@@ -494,6 +494,7 @@ class TushareFetcher(BaseFetcher):
                 raise RateLimitError(f"Tushare 配额超限: {e}") from e
 
             raise DataFetchError(f"Tushare express err: {e}") from e
+
     # 两融数据
     def margin(self, trade_date, start_date, end_date: str, exchange_id: str) -> pd.DataFrame:
         """
