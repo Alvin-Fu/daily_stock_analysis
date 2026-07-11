@@ -99,8 +99,8 @@ git clone https://github.com/ZhuLinsen/daily_stock_analysis.git
 cd daily_stock_analysis
 
 # 2. 配置环境变量
-cp .env.example .env
-vim .env  # 填入 API Key 和配置
+cp local.yaml.example local.yaml
+vim local.yaml  # 填入 API Key 和配置
 
 # 3. 启动容器
 docker-compose up -d
@@ -121,7 +121,7 @@ services:
     environment:
       - TZ=Asia/Shanghai
     env_file:
-      - .env
+      - local.yaml
     volumes:
       - ./data:/app/data      # 数据持久化
       - ./logs:/app/logs      # 日志持久化
@@ -133,7 +133,7 @@ services:
 
 ```bash
 docker build -t stock-analysis .
-docker run -d --env-file .env -v ./data:/app/data stock-analysis
+docker run -d --env-file local.yaml -v ./data:/app/data stock-analysis
 ```
 
 ---

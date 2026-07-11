@@ -262,6 +262,20 @@ class GeminiAnalyzer:
     "trend_prediction": "强烈看多/看多/震荡/看空/强烈看空",
     "operation_advice": "买入/加仓/持有/减仓/卖出/观望",
     "confidence_level": "高/中/低",
+    "research_report_analysis": {
+        "pe": 平均PE数值,
+        "pb": 平均PB数值,
+        "peg": 平均PEG数值,
+        "profit_margin": 平均利润率数值,
+        "max_pe": 最大PE数值,
+        "min_pe": 最小PE数值,
+        "max_pb": 最大PB数值,
+        "min_pb": 最小PB数值,
+        "max_peg": 最大PEG数值,
+        "min_peg": 最小PEG数值,
+        "max_profit_margin": 最大利润率数值,
+        "min_profit_margin": 最小利润率数值,
+    },
     
     "dashboard": {
         "core_conclusion": {
@@ -881,7 +895,7 @@ class GeminiAnalyzer:
 | 成交量 | {self._format_volume(today.get('volume'))} |
 | 成交额 | {self._format_amount(today.get('amount'))} |
 
-### 均线系统（关键判断指标）
+### 均线系统（关键判断指标）包含日线，周线，月线，需要分析对应的均线形态
 | 日均线 | 数值 | 说明 |
 |------|------|------|
 | MA5 | {today.get('ma5', 'N/A')} | 短期趋势线 |
@@ -945,7 +959,15 @@ class GeminiAnalyzer:
 | 70%筹码集中度 | {chip.get('concentration_70', 0):.2%} | |
 | 筹码状态 | {chip.get('chip_status', '未知')} | |
 """
-        
+
+        if 'analysis_contents' in context:
+            analysis_contents = context['analysis_contents']
+            prompt += f"""
+### 研报分析内容,基于研报中的内容你需要计算出不同机构的平均值，最高，最低值，并依据这些信息计算出对应的PEG指标，
+以及辅助分析当前的股价，根据研报内容以及当前的股价走势给出合理的建议
+{chr(10).join(analysis_contents)}
+"""
+
         # 添加趋势分析结果（基于交易理念的预判）
         if 'trend_analysis' in context:
             trend = context['trend_analysis']
@@ -1017,6 +1039,7 @@ class GeminiAnalyzer:
 4. ❓ 筹码结构是否健康？
 5. ❓ 消息面有无重大利空？（减持、处罚、业绩变脸等）
 6. ❓ 是否满足 MA5>MA10>MA20>MA50>MA120>MA200 多头排列？
+7. ❓ 研报中PE，PB，PEG，利润率等的平均值，最大值，最小值等信息
 
 ### 决策仪表盘要求：
 - **核心结论**：一句话说清该买/该卖/该等
@@ -1097,6 +1120,7 @@ class GeminiAnalyzer:
                         "- payable_turnover_days\n"
                         "12. core_thesis：研报核心上涨/看多逻辑（精简3条内）\n"
                         "13. key_risks：核心风险点\n"
+                        "14. rating_agency: 评级机构\n"
 
                         "### 格式强制要求\n"
                         "1. 年度统一标注：FY2XA=实际值，FY2XE=预测值\n"

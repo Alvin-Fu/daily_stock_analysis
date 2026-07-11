@@ -32,7 +32,7 @@ source venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 
 # 配置环境变量
-cp .env.example .env
+cp local.yaml.example local.yaml
 ```
 
 ### 提交流程

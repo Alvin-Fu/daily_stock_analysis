@@ -771,7 +771,7 @@ class StockAnalysisPipeline:
             task_date = task_m.get(TASK_NAME_DAILY_TASK)
             if task_date == today:
                 logger.debug(f"[{code}] 今日研报数据已存在，跳过获取（断点续传）")
-                #return True, None
+                return True, None
 
             df = self.akshare_fetcher.stock_research_report_em( code)
             if df is None or df.empty:
@@ -1710,7 +1710,6 @@ class StockAnalysisPipeline:
         5. 内存管理：AnalysisResult对象较大，批量处理时注意内存使用
         """
         logger.info(f"========== 开始处理 {code} ==========")
-        skip_analysis = True
         try:
             tasks = self.db.get_stock_daily_task( code)
             # Step 1: 获取并保存数据
@@ -1926,7 +1925,7 @@ class StockAnalysisPipeline:
             stock_codes = self.config.stock_list
         logger.info(f"需要分析的股票代码：{stock_codes}")
         if not stock_codes:
-            logger.error("未配置自选股列表，请在 .env 文件中设置 STOCK_LIST")
+            logger.error("未配置自选股列表，请在 local.yaml 文件中设置 STOCK_LIST")
             return []
         
         logger.info(f"===== 开始分析 {len(stock_codes)} 只股票 =====")

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Very small local Web UI for editing STOCK_LIST in .env.
+"""Very small local Web UI for editing STOCK_LIST in local.yaml.
 
 - Local-only by default (127.0.0.1)
 - No external dependencies
-- Only edits the STOCK_LIST key; other .env lines are preserved
+- Only edits the STOCK_LIST key; other local.yaml lines are preserved
 
 Usage:
   python webui.py
@@ -285,7 +285,7 @@ def _page(current_value: str, message: str | None = None) -> bytes:
     </form>
     
     <div class="footer">
-      <p>仅用于本地环境 (127.0.0.1) • 安全修改 .env 配置</p>
+      <p>仅用于本地环境 (127.0.0.1) • 安全修改 local.yaml 配置</p>
     </div>
   </div>
   

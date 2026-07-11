@@ -4,7 +4,7 @@
 A股自选股智能分析系统 - 环境验证测试
 ===================================
 
-用于验证 .env 配置是否正确，包括：
+用于验证 local.yaml 配置是否正确，包括：
 1. 配置加载测试
 2. 数据库查看
 3. 数据源测试
@@ -300,7 +300,7 @@ def test_llm():
         elif 'invalid' in error_str or 'api key' in error_str:
             print(f"\n  诊断: API Key 可能无效")
         elif 'model' in error_str:
-            print(f"\n  诊断: 模型名称可能不正确，尝试修改 .env 中的 GEMINI_MODEL")
+            print(f"\n  诊断: 模型名称可能不正确，尝试修改 local.yaml 中的 GEMINI_MODEL")
         
         return False
 

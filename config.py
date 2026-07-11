@@ -25,12 +25,12 @@ A股自选股智能分析系统 - 配置管理模块
 
 配置加载优先级（从高到低）：
 1. 系统环境变量（生产环境、Docker、GitHub Actions）
-2. .env 文件中的配置（本地开发、敏感信息）
+2. local.yaml 文件中的配置（本地开发、敏感信息）
 3. dataclass字段默认值（代码中的默认配置）
 
 安全设计：
-• 敏感信息（API Key、Token、密码）只存储在环境变量或 .env 文件中
-• .env 文件被 .gitignore 排除，避免泄露到版本控制
+• 敏感信息（API Key、Token、密码）只存储在环境变量或 local.yaml 文件中
+• local.yaml 文件被 .gitignore 排除，避免泄露到版本控制
 • 配置验证机制检查必要配置项的完整性
 
 模块职责：
@@ -39,8 +39,8 @@ A股自选股智能分析系统 - 配置管理模块
    - 避免重复加载环境变量，提高性能
    - 支持配置热重载（如股票列表更新）
 
-2. 从 .env 文件加载敏感配置
-   - 使用 python-dotenv 加载 .env 文件
+2. 从 local.yaml 文件加载敏感配置
+   - 使用 python-dotenv 加载 local.yaml 文件
    - 支持多环境配置（开发、测试、生产）
    - 提供类型安全的配置访问接口
 
@@ -784,9 +784,9 @@ class Config:
            • 示例：export GEMINI_API_KEY=your_key
            • 优点：安全，支持动态注入
         
-        2. .env 文件配置（本地开发、测试）
+        2. local.yaml 文件配置（本地开发、测试）
            • 中间优先级，方便开发人员
-           • 文件路径：项目根目录/.env
+           • 文件路径：项目根目录/local.yaml
            • 格式：KEY=VALUE，每行一个
            • 优点：版本控制友好（.gitignore排除）
         
@@ -848,7 +848,7 @@ class Config:
         # 步骤1：加载.env文件（如果存在）
         # 使用python-dotenv加载项目根目录下的.env文件
         # 注意：load_dotenv不会覆盖已存在的环境变量
-        env_path = Path(__file__).parent / '.env'
+        env_path = Path(__file__).parent / 'local.yaml'
         logging.warn(f"path {env_path}")
         load_dotenv(dotenv_path=env_path)
         
@@ -1016,7 +1016,7 @@ class Config:
         • A/B测试：快速切换不同的股票组合
         
         优先级规则（从高到低）：
-        1. .env 文件中的 STOCK_LIST 配置
+        1. local.yaml 文件中的 STOCK_LIST 配置
         2. 系统环境变量中的 STOCK_LIST
         3. 默认示例股票（000001 - 平安银行）
         
@@ -1061,7 +1061,7 @@ class Config:
         """
         # 步骤1：优先读取.env文件（本地开发友好）
         # 使用dotenv_values直接读取文件，不修改系统环境变量
-        env_path = Path(__file__).parent / '.env'
+        env_path = Path(__file__).parent / 'local.yaml'
         stock_list_str = ''
         
         if env_path.exists():

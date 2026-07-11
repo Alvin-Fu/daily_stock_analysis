@@ -38,8 +38,8 @@ git clone <your-repo-url> /opt/stock-analyzer
 cd /opt/stock-analyzer
 
 # 复制并编辑配置文件
-cp .env.example .env
-vim .env  # 填入真实的 API Key 等配置
+cp local.yaml.example local.yaml
+vim local.yaml  # 填入真实的 API Key 等配置
 ```
 
 ### 3. 一键启动
@@ -109,8 +109,8 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ### 3. 配置环境变量
 
 ```bash
-cp .env.example .env
-vim .env  # 填入配置
+cp local.yaml.example local.yaml
+vim local.yaml  # 填入配置
 ```
 
 ### 4. 运行
@@ -295,7 +295,7 @@ deploy:
 ```bash
 # 源服务器：打包
 cd /opt/stock-analyzer
-tar -czvf stock-analyzer-backup.tar.gz .env data/ logs/ reports/
+tar -czvf stock-analyzer-backup.tar.gz local.yaml data/ logs/ reports/
 
 # 目标服务器：部署
 mkdir -p /opt/stock-analyzer
@@ -416,7 +416,7 @@ schedule:
 
 方法二：直接修改代码后推送：
 ```bash
-# 修改 .env.example 或在代码中设置默认值
+# 修改 local.yaml.example 或在代码中设置默认值
 git commit -am "Update stock list"
 git push
 ```

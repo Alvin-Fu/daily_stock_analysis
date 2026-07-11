@@ -808,6 +808,7 @@ class StockResearchReportAnalyze(Base):
             'pdf_name': self.pdf_name,
             'analyze_content': self.analyze_content,
         }
+
 class DailyTask(Base):
     """
     每日任务状态状态模型 - ORM映射类
@@ -833,7 +834,6 @@ class DailyTask(Base):
             'task_name': self.task_name,
             'date': self.date,
         }
-
 
 class DatabaseManager:
     """
@@ -2202,6 +2202,24 @@ class DatabaseManager:
                 pdf_name_count[pdf_name] = True
             return pdf_name_count
 
+    def get_stock_research_report_analysis(self, code: str, days: int = 30)->  List[str]:
+        """
+        获取最近一段时间的研究报告分析数据
+        """
+        with self.get_session() as session:
+            results = session.execute(
+                select(StockResearchReportAnalyze.analyze_content)
+                .where(
+                    and_(
+                        StockResearchReportAnalyze.code == code,
+                        StockResearchReportAnalyze.date >= (date.today() - timedelta(days=days))
+                    )
+                )
+            ).scalars().all()
+            analyze_contents = [result for result in results]
+            return analyze_contents
+
+
     # 获取最近N天的数据
     def get_stock_research_report_last_days(self, code: str, days: int = 30) -> List[str]:
         """
@@ -2454,7 +2472,7 @@ class DatabaseManager:
         下载研究报告的PDF文件
 
         参数:
-            research_report: StockResearchReport实例
+            company-research-consensus-analyzer: StockResearchReport实例
 
         返回:
             Dict: 包含下载结果的字典
@@ -2668,6 +2686,9 @@ class DatabaseManager:
             'today': daily_today_data.to_dict(),
         }
 
+        analysis_contents = self.get_stock_research_report_analysis(code, 30)
+        context['analysis_contents'] = analysis_contents
+
         if daily_yesterday_data:
             context['yesterday'] = daily_yesterday_data.to_dict()
             # 计算成交量变化(今日成交量 / 昨日成交量）
@@ -2874,7 +2895,6 @@ class DatabaseManager:
         # 均线缠绕，趋势不明，处于盘整阶段
         else:
             return "震荡整理 ↔️"  # 趋势不明，观望为主
-
 
 def parse_row_date(row_date):
     if isinstance(row_date, str):
