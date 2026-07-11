@@ -7,11 +7,7 @@ import logging
 import os
 import io
 from datetime import datetime, date, timedelta
-from typing import Optional, List, Dict, Any, Mapping
-
-from PIL.PdfParser import pdf_repr
-from pandas.core.computation.expressions import where
-from sqlalchemy import create_engine, Column, Integer, String, Text, JSON
+from typing import Optional, List, Dict, Any
 
 import pandas as pd
 import requests
@@ -21,6 +17,7 @@ from sqlalchemy import (
     create_engine,
     Column,
     String,
+    Text,
     Float,
     Date,
     DateTime,
@@ -553,6 +550,27 @@ class StockBasic(Base):
             'list_status': self.list_status,
         }
 
+
+class IndustryChain(Base):
+    """
+    产业链结构缓存模型
+
+    数据库表: industry_chain
+    功能：缓存 LLM 生成的产业链拆解结果（上/中/下游环节及公司），
+         避免同一产业每次查询都重新生成
+    """
+    __tablename__ = 'industry_chain'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    industry_name = Column(String(100), nullable=False, unique=True, index=True)  # 产业名（唯一）
+    chain_json = Column(Text, nullable=False)  # 产业链结构 JSON（segments/companies）
+    data_source = Column(String(50))  # 生成来源说明（模型名等）
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    def __repr__(self):
+        return f"<IndustryChain(industry_name={self.industry_name}, updated_at={self.updated_at})>"
+
+
 class StockDailyBasic(Base):
     """股票每日指标数据"""
     __tablename__ = 'stock_daily_basic'
@@ -728,15 +746,15 @@ class StockResearchReport(Base):
     month_research_count = Column(Integer)  # 近一个月研报数
     industry = Column(String(200))  # 行业
     share_year1 = Column(String(10))
-    ratio_yaar1 = Column(String(10))
+    ratio_year1 = Column(String(10))
     forecasting_earning_per_share1 = Column(Float) # 每股收益
     Predicted_price_earnings_ratio1 = Column(Float)
     share_year2 = Column(String(10))
-    ratio_yaar2 = Column(String(10))
+    ratio_year2 = Column(String(10))
     forecasting_earning_per_share2 = Column(Float)
     Predicted_price_earnings_ratio2 = Column(Float)
     share_year3 = Column(String(10))
-    ratio_yaar3 = Column(String(10))
+    ratio_year3 = Column(String(10))
     forecasting_earning_per_share3 = Column(Float)
     Predicted_price_earnings_ratio3 = Column(Float)
     downloaded_path = Column(String(200))  # 下载路径
@@ -750,7 +768,7 @@ class StockResearchReport(Base):
     )
 
     def __repr__(self):
-        return f"<StockResearchReport(code={self.code}, date={self.date}, pdf_name={self.pdf_name}, title={self.title})>"
+        return f"<StockResearchReport(code={self.code}, date={self.date}, pdf_name={self.pdf_name}, report_name={self.report_name})>"
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式，便于数据交互"""
@@ -758,21 +776,21 @@ class StockResearchReport(Base):
             'code': self.code,
             'date': self.date,
             'pdf_name': self.pdf_name,
-            'title': self.title,
+            'report_name': self.report_name,
             'east_rating': self.east_rating,
             'rating_agency': self.rating_agency,
             'month_research_count': self.month_research_count,
             'industry': self.industry,
             'share_year1': self.share_year1,
-            'ratio_yaar1': self.ratio_yaar1,
+            'ratio_year1': self.ratio_year1,
             'forecasting_earning_per_share1': self.forecasting_earning_per_share1,
             'Predicted_price_earnings_ratio1': self.Predicted_price_earnings_ratio1,
             'share_year2': self.share_year2,
-            'ratio_yaar2': self.ratio_yaar2,
+            'ratio_year2': self.ratio_year2,
             'forecasting_earning_per_share2': self.forecasting_earning_per_share2,
             'Predicted_price_earnings_ratio2': self.Predicted_price_earnings_ratio2,
             'share_year3': self.share_year3,
-            'ratio_yaar3': self.ratio_yaar3,
+            'ratio_year3': self.ratio_year3,
             'forecasting_earning_per_share3': self.forecasting_earning_per_share3,
             'Predicted_price_earnings_ratio3': self.Predicted_price_earnings_ratio3,
             'downloaded_path': self.downloaded_path,
@@ -921,9 +939,32 @@ class DatabaseManager:
         # 这是SQLAlchemy的便利功能，避免手动编写CREATE TABLE语句
         Base.metadata.create_all(self._engine)
 
+        # 兼容迁移：早期版本把 ratio_year1/2/3 误建成 ratio_yaar1/2/3，改名对齐
+        self._migrate_research_report_columns()
+
         # 标记为已初始化，防止重复初始化
         self._initialized = True
         logger.info(f"数据库初始化完成: {db_url}")
+
+    def _migrate_research_report_columns(self) -> None:
+        """把老库 stock_research_report 里拼错的 ratio_yaar1/2/3 列改名为 ratio_year1/2/3"""
+        from sqlalchemy import inspect as sa_inspect, text
+
+        try:
+            inspector = sa_inspect(self._engine)
+            if 'stock_research_report' not in inspector.get_table_names():
+                return
+            columns = {col['name'] for col in inspector.get_columns('stock_research_report')}
+            with self._engine.begin() as conn:
+                for i in (1, 2, 3):
+                    old, new = f'ratio_yaar{i}', f'ratio_year{i}'
+                    if old in columns and new not in columns:
+                        conn.execute(text(
+                            f'ALTER TABLE stock_research_report RENAME COLUMN {old} TO {new}'
+                        ))
+                        logger.info(f"已迁移列 stock_research_report.{old} -> {new}")
+        except Exception as e:
+            logger.error(f"迁移 stock_research_report 列名失败: {e}")
 
     @classmethod
     def get_instance(cls) -> 'DatabaseManager':
@@ -1289,6 +1330,78 @@ class DatabaseManager:
             ).scalar_one_or_none()
             return result
 
+    def get_stock_basic_count(self) -> int:
+        """stock_basic 表的记录总数（用于判断基础信息是否已初始化）"""
+        from sqlalchemy import func
+
+        with self.get_session() as session:
+            return session.execute(
+                select(func.count()).select_from(StockBasic)
+            ).scalar_one()
+
+    def find_stock_by_name(self, name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        按公司名查股票（先精确匹配，再模糊包含匹配）
+
+        Returns:
+            匹配结果列表（dict），精确匹配排最前；查不到返回空列表
+        """
+        name = (name or '').strip()
+        if not name:
+            return []
+
+        with self.get_session() as session:
+            # 精确匹配
+            exact = session.execute(
+                select(StockBasic).where(StockBasic.name == name)
+            ).scalars().all()
+            if exact:
+                return [r.to_dict() for r in exact]
+
+            # 模糊包含匹配（名称短的排前面，更接近精确命中）
+            fuzzy = session.execute(
+                select(StockBasic)
+                .where(StockBasic.name.like(f'%{name}%'))
+                .limit(limit)
+            ).scalars().all()
+            results = sorted(fuzzy, key=lambda r: len(r.name))
+            return [r.to_dict() for r in results]
+
+    def get_industry_chain(self, industry_name: str, max_age_days: int = 7) -> Optional[str]:
+        """读取产业链缓存，超过 max_age_days 视为过期返回 None"""
+        with self.get_session() as session:
+            record = session.execute(
+                select(IndustryChain).where(IndustryChain.industry_name == industry_name)
+            ).scalar_one_or_none()
+            if record is None:
+                return None
+            if record.updated_at and record.updated_at < datetime.now() - timedelta(days=max_age_days):
+                logger.info(f"产业链缓存已过期: {industry_name}（{record.updated_at}）")
+                return None
+            return record.chain_json
+
+    def save_industry_chain(self, industry_name: str, chain_json: str, data_source: str = '') -> None:
+        """保存/更新产业链缓存"""
+        with self.get_session() as session:
+            try:
+                record = session.execute(
+                    select(IndustryChain).where(IndustryChain.industry_name == industry_name)
+                ).scalar_one_or_none()
+                if record is None:
+                    session.add(IndustryChain(
+                        industry_name=industry_name,
+                        chain_json=chain_json,
+                        data_source=data_source,
+                    ))
+                else:
+                    record.chain_json = chain_json
+                    record.data_source = data_source
+                    record.updated_at = datetime.now()
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                logger.error(f"保存产业链缓存失败[{industry_name}]: {e}")
+
     def get_latest_daily_basic_data(self, code: str, days: int = 2) -> List[StockDailyBasic]:
         """获取每日指标数据"""
         with self.get_session() as session:
@@ -1651,22 +1764,8 @@ class DatabaseManager:
                 # df.iterrows(): 返回(index, row)元组，_表示忽略索引
                 for _, row in df.iterrows():
                     # === 步骤1：解析日期（支持多种格式）===
-                    # 数据可能来自不同来源，日期格式不统一，需要标准化
-                    row_date = row.get('date')
-
-                    # 情况1：字符串格式，如 "2026-01-15"
-                    if isinstance(row_date, str):
-                        # datetime.strptime: 字符串解析为datetime对象
-                        # .date(): 提取日期部分（去除时间）
-                        row_date = datetime.strptime(row_date, '%Y-%m-%d').date()
-
-                    # 情况2：datetime对象（直接使用日期部分）
-                    elif isinstance(row_date, datetime):
-                        row_date = row_date.date()
-
-                    # 情况3：Pandas Timestamp对象（转换为datetime再提取日期）
-                    elif isinstance(row_date, pd.Timestamp):
-                        row_date = row_date.date()
+                    # 数据可能来自不同来源，日期格式不统一，统一走 parse_row_date（与周/月线一致）
+                    row_date = parse_row_date(row.get('date'))
 
                     if  row_date < start_date:
                         continue

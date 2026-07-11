@@ -31,6 +31,7 @@ from tenacity import (
 )
 
 from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS
+from .common import get_a_share_exchange
 
 logger = logging.getLogger(__name__)
 
@@ -164,17 +165,13 @@ class TushareFetcher(BaseFetcher):
         if '.' in code:
             return code.upper()
         
-        # 根据代码前缀判断市场
-        # 沪市：600xxx, 601xxx, 603xxx, 688xxx (科创板)
-        # 深市：000xxx, 002xxx, 300xxx (创业板)
-        if code.startswith(('600', '601', '603', '688')):
-            return f"{code}.SH"
-        elif code.startswith(('000', '002', '300')):
-            return f"{code}.SZ"
-        else:
-            # 默认尝试深市
-            logger.warning(f"无法确定股票 {code} 的市场，默认使用深市")
-            return f"{code}.SZ"
+        # 根据代码前缀判断市场（前缀映射统一维护在 data_provider/common.py）
+        exchange = get_a_share_exchange(code)
+        if exchange is not None:
+            return f"{code}.{exchange}"
+        # 默认尝试深市
+        logger.warning(f"无法确定股票 {code} 的市场，默认使用深市")
+        return f"{code}.SZ"
     
     @retry(
         stop=stop_after_attempt(3),
@@ -508,7 +505,7 @@ class TushareFetcher(BaseFetcher):
         logger.info(f"stk margin({ts_start}, {ts_end}, {trade_date})")
         try:
             df = ts.pro_api().margin(
-                trade_date=trade_date,
+                trade_date=t_date,
                 start_date=ts_start,
                 end_date=ts_end,
                 exchange_id=exchange_id,
@@ -534,10 +531,10 @@ class TushareFetcher(BaseFetcher):
             raise DataFetchError("Tushare API 未初始化，请检查 Token 配置")
         t_date = trade_date.replace('-', '')
         ts_code, ts_start, ts_end = self.fetch_common(stock_code, start_date, end_date)
-        logger.info(f"stk mergin detail{ts_code}, {ts_start}, {ts_end}, {t_date}")
+        logger.info(f"stk margin detail{ts_code}, {ts_start}, {ts_end}, {t_date}")
         try:
-            df = ts.pro_api().mergin_detail(
-                trade_date=trade_date,
+            df = ts.pro_api().margin_detail(
+                trade_date=t_date,
                 ts_code=ts_code,
                 start_date=ts_start,
                 end_date=ts_end,
@@ -553,7 +550,7 @@ class TushareFetcher(BaseFetcher):
                 logger.warning(f"Tushare 配额可能超限: {e}")
                 raise RateLimitError(f"Tushare 配额超限: {e}") from e
 
-            raise DataFetchError(f"Tushare mergin detail err: {e}") from e
+            raise DataFetchError(f"Tushare margin detail err: {e}") from e
 
     # 资金流向数据
     def moneyflow(self, stock_code, trade_date, start_date, end_date: str) -> pd.DataFrame:
@@ -569,7 +566,7 @@ class TushareFetcher(BaseFetcher):
         logger.info(f"stk moneyflow{ts_code}, {ts_start}, {ts_end}, {t_date}")
         try:
             df = ts.pro_api().moneyflow(
-                trade_date=trade_date,
+                trade_date=t_date,
                 ts_code=ts_code,
                 start_date=ts_start,
                 end_date=ts_end,
@@ -601,7 +598,7 @@ class TushareFetcher(BaseFetcher):
         logger.info(f"stk moneyflow hsgt, {ts_start}, {ts_end}, {t_date}")
         try:
             df = ts.pro_api().moneyflow_hsgt(
-                trade_date=trade_date,
+                trade_date=t_date,
                 start_date=ts_start,
                 end_date=ts_end,
             )

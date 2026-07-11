@@ -721,7 +721,25 @@ class GeminiAnalyzer:
         
         # 所有方式都失败
         raise last_error or Exception("所有 AI API 调用失败，已达最大重试次数")
-    
+
+    def generate_text(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        temperature: float = 0.7,
+        max_output_tokens: int = 8192,
+    ) -> str:
+        """
+        通用文本生成（复用重试/备选模型/OpenAI 回退机制）
+
+        用于股票分析之外的 LLM 调用，如产业链拆解、报告汇总
+        """
+        generation_config = {
+            "temperature": temperature,
+            "max_output_tokens": max_output_tokens,
+        }
+        return self._call_api_with_retry(system_prompt, prompt, generation_config)
+
     def analyze(
         self, 
         context: Dict[str, Any],
@@ -867,8 +885,8 @@ class GeminiAnalyzer:
             stock_name = STOCK_NAME_MAP.get(code, f'股票{code}')
             
         today = context.get('today', {})
-        week_today_data = today.get('week_today_data', {})
-        month_today_data = today.get('month_today_data', {})
+        week_today_data = context.get('week_today_data', {})
+        month_today_data = context.get('month_today_data', {})
         
         # ========== 构建决策仪表盘格式的输入 ==========
         prompt = f"""# 决策仪表盘分析请求

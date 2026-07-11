@@ -38,7 +38,6 @@ class CalculateFetcher:
             key = f'ema{period}'
             logger.warning(f"ma key: [{key}]")
             df[key] = ema
-        df = df.sort_values(by='date', ascending=False).reset_index(drop=True)
         return df
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -50,6 +49,8 @@ class CalculateFetcher:
         - Volume_Ratio: 量比（今日成交量 / 5日平均成交量）
         """
         df = df.copy()
+        if 'date' in df.columns:
+            df = df.sort_values(by='date', ascending=True).reset_index(drop=True)
         df = self.calculate_macd_signal(df)
         df = self.calculate_ma_ema(df, "close")
         logging.warning(f"{df['ma200'][-10:]}200天线")

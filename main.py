@@ -118,6 +118,9 @@ from search_service import SearchService
 from stock_analyzer import StockTrendAnalyzer, TrendAnalysisResult
 from market_analyzer import MarketAnalyzer
 from data_provider.calculate import CalculateFetcher
+from data_provider.common import get_a_share_exchange
+from stock_query import resolve_query, QUERY_TYPE_COMPANY
+from industry_analyzer import IndustryChainAnalyzer
 import pandas as pd
 
 
@@ -458,7 +461,7 @@ class StockAnalysisPipeline:
         """
         # 步骤1：加载配置（支持自定义配置和全局配置）
         self.config = config or get_config()
-        set_tushare_token(config.tushare_token)
+        set_tushare_token(self.config.tushare_token)
         
         # 步骤2：设置并发数（支持参数覆盖配置）
         self.max_workers = max_workers or self.config.max_workers
@@ -645,7 +648,7 @@ class StockAnalysisPipeline:
         code: str,
         force_refresh: bool = False,
     )-> Tuple[bool, Optional[str]]:
-        if not code.startswith(('600', '601', '603', '688', '000', '002', '300')):
+        if get_a_share_exchange(code) is None:
             logger.warning(f"[{code} 非A股不能获取周线和月线]")
             return True, None
 
@@ -802,6 +805,9 @@ class StockAnalysisPipeline:
             logger.warning(f"已存在的研报[{pdf_name_m}]")
             research_report_analysis: List[Dict[str, Any]] = []
 
+            # 只处理最近 2 天内的研报
+            report_date_threshold = date.today() - timedelta(days=2)
+
             for _, row in df.iterrows():
                 report_date = row.get("date")
                 if report_date is None:
@@ -809,14 +815,8 @@ class StockAnalysisPipeline:
                     continue
                 report_date = parse_row_date(report_date)
 
-                half_year_ago = date.today() - timedelta(days=2)
-
-                # 如果研报日期早于半年前，跳过
-                if report_date < half_year_ago:
-                    logger.debug(f"[{code}] 研报 {pdf_name} 日期 ({report_date}) 早于 ({half_year_ago})，已忽略")
-                    continue
-
-                if report_date in pdf_name_m:
+                if report_date < report_date_threshold:
+                    logger.debug(f"[{code}] 研报 {row.get('pdf_name')} 日期 ({report_date}) 早于 ({report_date_threshold})，已忽略")
                     continue
 
                 pdf_url = row.get("report_pdf_link")
@@ -1755,7 +1755,82 @@ class StockAnalysisPipeline:
             # 捕获所有异常，确保单股失败不影响整体
             logger.exception(f"[{code}] 处理过程发生未知异常: {e}")
             return None
-    
+
+    def run_query(self, query: str, send_notification: bool = False) -> bool:
+        """
+        按需分析入口：输入股票代码/公司名 → 单公司分析；输入产业名 → 产业上下游分析
+
+        Args:
+            query: 股票代码（600519）、公司名（贵州茅台）或产业名（锂电池）
+            send_notification: 是否推送结果到通知渠道
+
+        Returns:
+            是否成功产出报告
+        """
+        # 公司名解析依赖 stock_basic，未初始化时先拉全市场基础信息
+        try:
+            if self.db.get_stock_basic_count() == 0:
+                logger.info("stock_basic 为空，先拉取全市场股票基础信息...")
+                self.save_stock_basic_by_tushare()
+        except Exception as e:
+            logger.warning(f"初始化 stock_basic 失败（公司名解析可能不可用）: {e}")
+
+        resolution = resolve_query(query, self.db)
+        logger.info(f"查询解析结果 → {resolution.describe()}")
+
+        date_str = datetime.now().strftime('%Y%m%d')
+
+        # ===== 公司分析 =====
+        if resolution.query_type == QUERY_TYPE_COMPANY:
+            if resolution.candidates:
+                logger.info(
+                    f"「{query}」还匹配到其他候选: "
+                    f"{[(c['name'], c['code']) for c in resolution.candidates]}，"
+                    f"如不是想要的公司请直接输入代码"
+                )
+            result = self.process_single_stock(
+                resolution.code,
+                single_stock_notify=send_notification,
+            )
+            if result is None:
+                logger.error(f"[{resolution.code}] 公司分析失败")
+                return False
+            report = self.notifier.generate_single_stock_report(result)
+            filepath = self.notifier.save_report_to_file(
+                report, filename=f"company_{resolution.code}_{date_str}.md"
+            )
+            logger.info(f"公司分析报告已保存: {filepath}")
+            print(report)
+            return True
+
+        # ===== 产业上下游分析 =====
+        industry_analyzer = IndustryChainAnalyzer(
+            db=self.db,
+            analyzer=self.analyzer,
+            akshare_fetcher=self.akshare_fetcher,
+            analyze_stock_fn=self.process_single_stock,
+            search_service=self.search_service if self.search_service.is_available else None,
+        )
+        try:
+            report = industry_analyzer.analyze(resolution.query)
+        except Exception as e:
+            logger.error(f"[{resolution.query}] 产业链分析失败: {e} {traceback.format_exc()}")
+            return False
+
+        filepath = self.notifier.save_report_to_file(
+            report, filename=f"industry_{resolution.query}_{date_str}.md"
+        )
+        logger.info(f"产业链分析报告已保存: {filepath}")
+        print(report)
+
+        if send_notification and self.notifier.is_available():
+            try:
+                if self.notifier.send(report):
+                    logger.info(f"[{resolution.query}] 产业报告推送成功")
+            except Exception as e:
+                logger.error(f"[{resolution.query}] 产业报告推送失败: {e}")
+        return True
+
     def run(
         self, 
         stock_codes: Optional[List[str]] = None,
@@ -1969,7 +2044,7 @@ class StockAnalysisPipeline:
         # dry-run 模式下，数据获取成功即视为成功
         if dry_run:
             # 检查哪些股票的数据今天已存在
-            success_count = sum(1 for code in stock_codes if self.db.has_today_data(code))
+            success_count = sum(1 for code in stock_codes if self.db.is_date_exist(code, "daily"))
             fail_count = len(stock_codes) - success_count
         else:
             success_count = len(results)
@@ -2210,7 +2285,15 @@ def parse_arguments() -> argparse.Namespace:
   python main.py --single-notify    # 启用单股推送模式（每分析完一只立即推送）
   python main.py --schedule         # 启用定时任务模式
   python main.py --market-review    # 仅运行大盘复盘
+  python main.py --query 贵州茅台    # 按公司名/代码即时分析单家公司
+  python main.py --query 锂电池      # 按产业名分析产业链上下游公司
         '''
+    )
+
+    parser.add_argument(
+        '--query',
+        type=str,
+        help='即时查询分析：股票代码/公司名→公司分析；产业名→产业链上下游分析。加 --single-notify 推送结果'
     )
     
     parser.add_argument(
@@ -2482,6 +2565,13 @@ def main() -> int:
             logger.error(f"启动 WebUI 失败: {e}")
 
     try:
+        # 模式0: 按需查询分析（公司名/代码 → 公司分析；产业名 → 产业链分析）
+        if args.query:
+            logger.info(f"模式: 按需查询分析（{args.query}）")
+            pipeline = StockAnalysisPipeline(max_workers=args.workers)
+            ok = pipeline.run_query(args.query, send_notification=args.single_notify)
+            return 0 if ok else 1
+
         # 模式1: 仅大盘复盘
         if args.market_review:
             logger.info("模式: 仅大盘复盘")

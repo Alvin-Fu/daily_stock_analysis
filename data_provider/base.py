@@ -184,7 +184,7 @@ class BaseFetcher(ABC):
             logger.info(f"end date{end_date}, start date{start_date}")
         
         if start_date is None:
-            start_date = datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=days * 2)
+            start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=days * 2)).strftime('%Y-%m-%d')
             logger.info(f"start data{start_date}")
         
         logger.info(f"[{self.name}] 获取 {stock_code} 数据: {start_date} ~ {end_date}")
@@ -300,7 +300,6 @@ class BaseFetcher(ABC):
             key = f'ema{period}'
             logger.warning(f"ma key: [{key}]")
             df[key] = ema
-        df = df.sort_values(by='date', ascending=False).reset_index(drop=True)
         return df
 
     def _calculate_macd_signal(

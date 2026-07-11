@@ -24,7 +24,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_ENV_PATH = os.getenv("ENV_FILE", ".env")
+# 与 config.py 保持一致：优先编辑 local.yaml（config 的主配置源），仅当只有 .env 时才编辑 .env
+_DEFAULT_ENV_FILE = "local.yaml" if os.path.exists("local.yaml") or not os.path.exists(".env") else ".env"
+_ENV_PATH = os.getenv("ENV_FILE", _DEFAULT_ENV_FILE)
 
 
 def _read_env_text(path: str) -> str:

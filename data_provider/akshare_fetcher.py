@@ -1034,13 +1034,78 @@ class AkshareFetcher(BaseFetcher):
                 year_match = re.search(r'(\d{4})', col)
                 if year_match:
                     year = year_match.group(1)
-                    df[f'ratio_year{index_share}'] = year
+                    df[f'ratio_year{index_ratio}'] = year
                 else:
                     logger.warning(f"[数据处理] 未找到年份信息，将使用默认值 '2023'")
 
         df = df.rename(columns=column_mapping)
 
         return df
+
+    def get_board_names(self, board_type: str = 'industry') -> pd.DataFrame:
+        """
+        获取东财板块名称列表
+
+        Args:
+            board_type: industry=行业板块 / concept=概念板块
+
+        Returns:
+            DataFrame，含「板块名称」「板块代码」等列；失败返回空 DataFrame
+        """
+        import akshare as ak
+
+        self._set_random_user_agent()
+        self._enforce_rate_limit()
+
+        try:
+            if board_type == 'concept':
+                df = ak.stock_board_concept_name_em()
+            else:
+                df = ak.stock_board_industry_name_em()
+            if df is None or df.empty:
+                logger.warning(f"[API返回] 板块名称列表为空（board_type={board_type}）")
+                return pd.DataFrame()
+            logger.info(f"[API返回] 板块名称列表: {len(df)} 个（board_type={board_type}）")
+            return df
+        except Exception as e:
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ['banned', 'blocked', '频率', 'rate', '限制']):
+                raise RateLimitError(f"Akshare 可能被限流: {e}") from e
+            logger.error(f"获取板块名称列表失败（board_type={board_type}）: {e}")
+            return pd.DataFrame()
+
+    def get_board_constituents(self, board_name: str, board_type: str = 'industry') -> pd.DataFrame:
+        """
+        获取东财板块成分股
+
+        Args:
+            board_name: 板块名称（如「锂电池」「白酒」）
+            board_type: industry=行业板块 / concept=概念板块
+
+        Returns:
+            DataFrame，含「代码」「名称」等列；失败返回空 DataFrame
+        """
+        import akshare as ak
+
+        self._set_random_user_agent()
+        self._enforce_rate_limit()
+
+        try:
+            if board_type == 'concept':
+                df = ak.stock_board_concept_cons_em(symbol=board_name)
+            else:
+                df = ak.stock_board_industry_cons_em(symbol=board_name)
+            if df is None or df.empty:
+                logger.warning(f"[API返回] 板块成分股为空: {board_name}（board_type={board_type}）")
+                return pd.DataFrame()
+            logger.info(f"[API返回] 板块 {board_name} 成分股: {len(df)} 只")
+            return df
+        except Exception as e:
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ['banned', 'blocked', '频率', 'rate', '限制']):
+                raise RateLimitError(f"Akshare 可能被限流: {e}") from e
+            logger.error(f"获取板块成分股失败[{board_name}]: {e}")
+            return pd.DataFrame()
 
     def get_enhanced_data(self, stock_code: str, days: int = 60) -> Dict[str, Any]:
         """

@@ -851,6 +851,8 @@ class Config:
         env_path = Path(__file__).parent / 'local.yaml'
         logging.warn(f"path {env_path}")
         load_dotenv(dotenv_path=env_path)
+        # 兼容旧部署：继续加载 .env（load_dotenv 不覆盖已存在的值，local.yaml 优先）
+        load_dotenv(dotenv_path=Path(__file__).parent / '.env')
         
         # 步骤2：解析自选股列表（逗号分隔，必需配置）
         # 环境变量：STOCK_LIST=600519,000001,300750
@@ -1061,14 +1063,16 @@ class Config:
         """
         # 步骤1：优先读取.env文件（本地开发友好）
         # 使用dotenv_values直接读取文件，不修改系统环境变量
-        env_path = Path(__file__).parent / 'local.yaml'
         stock_list_str = ''
-        
-        if env_path.exists():
-            env_values = dotenv_values(env_path)
-            stock_list_str = (env_values.get('STOCK_LIST') or '').strip()
+        for filename in ('local.yaml', '.env'):
+            env_path = Path(__file__).parent / filename
+            if env_path.exists():
+                env_values = dotenv_values(env_path)
+                stock_list_str = (env_values.get('STOCK_LIST') or '').strip()
+                if stock_list_str:
+                    break
 
-        # 步骤2：如果.env中没有配置，回退到系统环境变量
+        # 步骤2：如果配置文件中没有配置，回退到系统环境变量
         if not stock_list_str:
             stock_list_str = os.getenv('STOCK_LIST', '')
 
